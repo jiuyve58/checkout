@@ -399,7 +399,8 @@ app.get('/api/user/:id', async (req, res) => {
 app.put('/api/user/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    let user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    if (!user) user = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
     }
@@ -411,9 +412,9 @@ app.put('/api/user/:id', async (req, res) => {
     if (phone !== undefined) updateData.phone = phone;
     if (status !== undefined) updateData.status = status;
     if (Object.keys(updateData).length > 0) {
-      await update(COLLECTIONS.USERS, id, updateData);
+      await update(COLLECTIONS.USERS, user._id, updateData);
     }
-    const updatedUser = await queryOne(COLLECTIONS.USERS, { _id: id });
+    const updatedUser = await queryOne(COLLECTIONS.USERS, { _id: user._id });
     res.json({ code: 0, data: sanitizeUser(updatedUser) });
   } catch (err) {
     console.error('更新用户失败:', err);
@@ -484,11 +485,12 @@ app.get('/api/users/:id', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    let user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    if (!user) user = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
     }
-    await remove(COLLECTIONS.USERS, id);
+    await remove(COLLECTIONS.USERS, user._id);
     res.json({ code: 0, message: '删除成功' });
   } catch (err) {
     console.error('删除用户失败:', err);
@@ -524,13 +526,16 @@ app.post('/api/categories', async (req, res) => {
 app.put('/api/categories/:id', async (req, res) => {
   try {
     const id = req.params.id;
+    let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: id });
+    if (!cat) cat = await queryOne(COLLECTIONS.CATEGORIES, { id: Number(id) });
+    if (!cat) return res.status(404).json({ code: 404, message: '分类不存在' });
     const { name, sort, enabled } = req.body;
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (sort !== undefined) updateData.sort = sort;
     if (enabled !== undefined) updateData.enabled = enabled;
     if (Object.keys(updateData).length > 0) {
-      await update(COLLECTIONS.CATEGORIES, id, updateData);
+      await update(COLLECTIONS.CATEGORIES, cat._id, updateData);
     }
     res.json({ code: 0, message: '更新成功' });
   } catch (err) {
@@ -541,7 +546,11 @@ app.put('/api/categories/:id', async (req, res) => {
 app.delete('/api/categories/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    await remove(COLLECTIONS.CATEGORIES, id);
+    let docId = id;
+    let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: id });
+    if (!cat) cat = await queryOne(COLLECTIONS.CATEGORIES, { id: Number(id) });
+    if (cat) docId = cat._id;
+    await remove(COLLECTIONS.CATEGORIES, docId);
     res.json({ code: 0, message: '删除成功' });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
@@ -584,7 +593,8 @@ app.get('/api/products', async (req, res) => {
 app.get('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
     }
@@ -641,7 +651,8 @@ app.post('/api/products', async (req, res) => {
 app.put('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
     }
@@ -653,7 +664,7 @@ app.put('/api/products/:id', async (req, res) => {
       }
     }
     if (Object.keys(updateData).length > 0) {
-      await update(COLLECTIONS.BOOKS, id, updateData);
+      await update(COLLECTIONS.BOOKS, product._id, updateData);
     }
     res.json({ code: 0, message: '更新成功' });
   } catch (err) {
@@ -665,7 +676,11 @@ app.put('/api/products/:id', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    await remove(COLLECTIONS.BOOKS, id);
+    let docId = id;
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
+    if (product) docId = product._id;
+    await remove(COLLECTIONS.BOOKS, docId);
     res.json({ code: 0, message: '删除成功' });
   } catch (err) {
     console.error('删除图书失败:', err);
@@ -680,7 +695,13 @@ app.post('/api/categories/batch-delete', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少ID列表' });
     }
     for (const id of ids) {
-      await remove(COLLECTIONS.CATEGORIES, id);
+      try {
+        let docId = id;
+        let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: id });
+        if (!cat) cat = await queryOne(COLLECTIONS.CATEGORIES, { id: Number(id) });
+        if (cat) docId = cat._id;
+        await remove(COLLECTIONS.CATEGORIES, docId);
+      } catch {}
     }
     res.json({ code: 0, message: `成功删除 ${ids.length} 条记录` });
   } catch (err) {
@@ -695,7 +716,13 @@ app.post('/api/products/batch-delete', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少ID列表' });
     }
     for (const id of ids) {
-      await remove(COLLECTIONS.BOOKS, id);
+      try {
+        let docId = id;
+        let p = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+        if (!p) p = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
+        if (p) docId = p._id;
+        await remove(COLLECTIONS.BOOKS, docId);
+      } catch {}
     }
     res.json({ code: 0, message: `成功删除 ${ids.length} 条记录` });
   } catch (err) {
@@ -710,7 +737,13 @@ app.post('/api/users/batch-delete', async (req, res) => {
       return res.status(400).json({ code: 400, message: '缺少ID列表' });
     }
     for (const id of ids) {
-      await remove(COLLECTIONS.USERS, id);
+      try {
+        let docId = id;
+        let u = await queryOne(COLLECTIONS.USERS, { _id: id });
+        if (!u) u = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
+        if (u) docId = u._id;
+        await remove(COLLECTIONS.USERS, docId);
+      } catch {}
     }
     res.json({ code: 0, message: `成功删除 ${ids.length} 条记录` });
   } catch (err) {
@@ -739,7 +772,8 @@ app.post('/api/borrow', async (req, res) => {
     if (!product_id || !user_id) {
       return res.status(400).json({ code: 400, message: '缺少必要参数' });
     }
-    const product = await queryOne(COLLECTIONS.BOOKS, { _id: product_id });
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: product_id });
+    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(product_id) });
     if (!product) {
       return res.status(404).json({ code: 404, message: '图书不存在' });
     }
@@ -747,7 +781,7 @@ app.post('/api/borrow', async (req, res) => {
       return res.status(409).json({ code: 409, message: '库存不足，无法借阅' });
     }
     const activeBorrow = await queryOne(COLLECTIONS.BORROW_RECORDS, {
-      product_id: product_id,
+      product_id: String(product_id),
       user_id: user_id,
       status: 'borrowed'
     });
@@ -759,7 +793,7 @@ app.post('/api/borrow', async (req, res) => {
     const newRecord = {
       user_id: user_id,
       user_name: user_name || '',
-      product_id: product_id,
+      product_id: String(product_id),
       product_name: product.name,
       product_image: product.image || '',
       product_code: product.code || '',
@@ -771,7 +805,7 @@ app.post('/api/borrow', async (req, res) => {
     };
     const result = await create(COLLECTIONS.BORROW_RECORDS, newRecord);
     if (product.stock !== undefined) {
-      await update(COLLECTIONS.BOOKS, product_id, { stock: product.stock - 1 });
+      await update(COLLECTIONS.BOOKS, product._id, { stock: product.stock - 1 });
     }
     newRecord._id = result.id;
     res.json({ code: 0, data: newRecord });
@@ -794,13 +828,14 @@ app.post('/api/return', async (req, res) => {
     if (record.status !== 'borrowed' && record.status !== 'overdue') {
       return res.status(400).json({ code: 400, message: '该记录已归还' });
     }
-    await update(COLLECTIONS.BORROW_RECORDS, record_id, {
+    await update(COLLECTIONS.BORROW_RECORDS, record._id, {
       status: 'returned',
       return_date: new Date().toISOString()
     });
-    const product = await queryOne(COLLECTIONS.BOOKS, { _id: record.product_id });
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: record.product_id });
+    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(record.product_id) });
     if (product && product.stock !== undefined) {
-      await update(COLLECTIONS.BOOKS, record.product_id, { stock: product.stock + 1 });
+      await update(COLLECTIONS.BOOKS, product._id, { stock: product.stock + 1 });
     }
     record.status = 'returned';
     record.return_date = new Date().toISOString();
