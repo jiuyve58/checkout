@@ -3,7 +3,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromLocal, importDataFromJson, seedDataFromLocal } = require('./db');
+const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromLocal, importDataFromJson, seedDataFromLocal, waitForDb, initCloud } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +16,14 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
+
+app.use(async (req, res, next) => {
+  if (!cloudAvailable()) {
+    await waitForDb(1200);
+  }
+  next();
+});
+
 app.use(express.static(__dirname));
 
 app.get('/health', (req, res) => {
@@ -922,44 +930,47 @@ app.use((err, req, res, next) => {
   res.status(500).json({ code: 500, message: err.message || '服务器内部错误' });
 });
 
-app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`图书管理系统API服务已启动: http://localhost:${PORT}`);
-  const isCloud = cloudAvailable();
-  console.log(`数据库模式: ${isCloud ? '云数据库' : '文件存储(db.json)'}`);
+  const checkAfterBoot = async () => {
+    try { await initCloud(); } catch (e) {}
+    const isCloud = cloudAvailable();
+    console.log(`数据库模式: ${isCloud ? '云数据库' : '文件存储(db.json)'}`);
 
-  // 自动创建默认管理员账号
-  try {
-    const adminExists = await queryOne(COLLECTIONS.USERS, { role: 'admin' });
-    if (!adminExists) {
-      const adminId = generateUserId();
-      const adminUser = {
-        _id: adminId,
-        username: 'admin',
-        password: hashPassword('admin123'),
-        nickname: '系统管理员',
-        avatar: '',
-        email: '',
-        phone: '',
-        member_level: 'vip',
-        role: 'admin',
-        status: 'active',
-        created_at: new Date().toISOString()
-      };
-      await create(COLLECTIONS.USERS, adminUser);
-      console.log('[系统] 已创建默认管理员账号: admin / admin123');
-    }
-  } catch (err) {
-    console.warn('[系统] 检查/创建管理员失败:', err.message);
-  }
-
-  if (isCloud) {
     try {
-      await seedDataFromLocal();
-      console.log('[数据库] 数据初始化检查完成');
+      const adminExists = await queryOne(COLLECTIONS.USERS, { role: 'admin' });
+      if (!adminExists) {
+        const adminId = generateUserId();
+        const adminUser = {
+          _id: adminId,
+          username: 'admin',
+          password: hashPassword('admin123'),
+          nickname: '系统管理员',
+          avatar: '',
+          email: '',
+          phone: '',
+          member_level: 'vip',
+          role: 'admin',
+          status: 'active',
+          created_at: new Date().toISOString()
+        };
+        await create(COLLECTIONS.USERS, adminUser);
+        console.log('[系统] 已创建默认管理员账号: admin / admin123');
+      }
     } catch (err) {
-      console.warn('[数据库] 数据初始化失败:', err.message);
+      console.warn('[系统] 检查/创建管理员失败:', err.message);
     }
-  } else {
-    console.log('提示: 部署后如需导入数据，访问 /api/import-from-local');
-  }
+
+    if (isCloud) {
+      try {
+        await seedDataFromLocal();
+        console.log('[数据库] 数据初始化检查完成');
+      } catch (err) {
+        console.warn('[数据库] 数据初始化失败:', err.message);
+      }
+    } else {
+      console.log('提示: 部署后如需导入数据，访问 /api/import-from-local');
+    }
+  };
+  checkAfterBoot().catch(() => {});
 });

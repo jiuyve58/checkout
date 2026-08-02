@@ -28,39 +28,60 @@ for (const [k, v] of Object.entries(collectionMap)) {
 }
 
 function initCloud() {
-  if (cloudReady) return true;
-  try {
-    console.log('[数据库] 正在初始化云数据库...');
-    console.log('[数据库] TCB_ENV:', process.env.TCB_ENV || '(未设置,使用默认)');
-    console.log('[数据库] SECRETID:', process.env.TENCENTCLOUD_SECRETID ? '已设置' : '未设置');
-    console.log('[数据库] SECRETKEY:', process.env.TENCENTCLOUD_SECRETKEY ? '已设置' : '未设置');
-    console.log('[数据库] SCF_RUNTIME:', process.env.SCF_RUNTIME || '(非云函数)');
+  if (cloudReady) return Promise.resolve(true);
+  const timeoutMs = Number(process.env.TCB_INIT_TIMEOUT) || 2500;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (!cloudReady) {
+        console.warn(`[数据库] 云数据库初始化超时(${timeoutMs}ms),降级为文件存储`);
+        cloudReady = false;
+        resolve(false);
+      }
+    }, timeoutMs);
+    (async () => {
+      try {
+        console.log('[数据库] 正在初始化云数据库...');
+        console.log('[数据库] TCB_ENV:', process.env.TCB_ENV || '(未设置,使用默认)');
+        console.log('[数据库] SECRETID:', process.env.TENCENTCLOUD_SECRETID ? '已设置' : '未设置');
+        console.log('[数据库] SECRETKEY:', process.env.TENCENTCLOUD_SECRETKEY ? '已设置' : '未设置');
+        console.log('[数据库] SCF_RUNTIME:', process.env.SCF_RUNTIME || '(非云函数)');
 
-    const cloudbase = require('@cloudbase/node-sdk');
-    const envId = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
+        const cloudbase = require('@cloudbase/node-sdk');
+        const envId = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
 
-    const initOptions = { envId };
-    if (process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY) {
-      initOptions.credentials = {
-        secretId: process.env.TENCENTCLOUD_SECRETID,
-        secretKey: process.env.TENCENTCLOUD_SECRETKEY
-      };
-    }
+        const initOptions = { envId };
+        if (process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY) {
+          initOptions.credentials = {
+            secretId: process.env.TENCENTCLOUD_SECRETID,
+            secretKey: process.env.TENCENTCLOUD_SECRETKEY
+          };
+        }
 
-    console.log('[数据库] 正在调用 cloudbase.init...');
-    const app = cloudbase.init(initOptions);
-    console.log('[数据库] init 成功,正在获取 database...');
-    cloudDb = app.database();
-    console.log('[数据库] database 获取成功');
-    cloudReady = true;
-    console.log('[数据库] 云数据库连接成功');
-    return true;
-  } catch (err) {
-    console.error('[数据库] 云数据库初始化失败:', err.message);
-    console.error('[数据库] 错误堆栈:', err.stack);
-    cloudReady = false;
-    return false;
-  }
+        console.log('[数据库] 正在调用 cloudbase.init...');
+        const app = cloudbase.init(initOptions);
+        console.log('[数据库] init 成功,正在获取 database...');
+        cloudDb = app.database();
+        if (typeof cloudDb.collection === 'function') {
+          try {
+            const testCol = getCloudCollection('users');
+            await Promise.race([
+              testCol.limit(1).get().then(() => true).catch(() => false),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('ping-timeout')), Math.max(800, timeoutMs - 500)))
+            ]);
+          } catch (_) {}
+        }
+        clearTimeout(timer);
+        cloudReady = true;
+        console.log('[数据库] 云数据库连接成功');
+        resolve(true);
+      } catch (err) {
+        clearTimeout(timer);
+        console.error('[数据库] 云数据库初始化失败:', err.message);
+        cloudReady = false;
+        resolve(false);
+      }
+    })();
+  });
 }
 
 function cloudAvailable() {
@@ -70,6 +91,27 @@ function cloudAvailable() {
 function getCloudCollection(name) {
   const collectionName = collectionMap[name] || name;
   return cloudDb.collection(collectionName);
+}
+
+const CLOUD_OP_TIMEOUT = Number(process.env.TCB_OP_TIMEOUT) || 3500;
+let cloudFailedStreak = 0;
+const CLOUD_FAIL_THRESHOLD = 2;
+function markCloudFail(msg) {
+  cloudFailedStreak += 1;
+  console.warn(`[云数据库] 第${cloudFailedStreak}次失败:`, msg);
+  if (cloudFailedStreak >= CLOUD_FAIL_THRESHOLD) {
+    cloudReady = false;
+    console.warn(`[云数据库] 连续失败${cloudFailedStreak}次,临时降级为文件存储`);
+  }
+}
+function markCloudOk() {
+  cloudFailedStreak = 0;
+}
+function wrapCloud(promise, opName) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout:${opName}`)), CLOUD_OP_TIMEOUT))
+  ]);
 }
 
 function readLocalData() {
@@ -126,14 +168,16 @@ async function query(name, condition = {}) {
   if (cloudAvailable()) {
     try {
       let col = getCloudCollection(name);
+      let res;
       if (Object.keys(condition).length > 0) {
-        const res = await col.where(condition).get();
-        return res.data.map(normalizeItem);
+        res = await wrapCloud(col.where(condition).get(), `query(${name} where)`);
       } else {
-        const res = await col.get();
-        return res.data.map(normalizeItem);
+        res = await wrapCloud(col.get(), `query(${name} all)`);
       }
+      markCloudOk();
+      return res.data.map(normalizeItem);
     } catch (err) {
+      markCloudFail(err.message);
       console.warn('[云数据库] query失败，降级为文件存储:', err.message);
     }
   }
@@ -160,9 +204,11 @@ async function create(name, data) {
       const col = getCloudCollection(name);
       const doc = { ...data };
       delete doc._id;
-      const res = await col.add(doc);
+      const res = await wrapCloud(col.add(doc), `create(${name})`);
+      markCloudOk();
       return { _id: res.id, ...data };
     } catch (err) {
+      markCloudFail(err.message);
       console.warn('[云数据库] create失败，降级为文件存储:', err.message);
     }
   }
@@ -184,9 +230,11 @@ async function update(name, docId, data) {
       const col = getCloudCollection(name);
       const updateData = { ...data };
       delete updateData._id;
-      await col.doc(String(docId)).update(updateData);
+      await wrapCloud(col.doc(String(docId)).update(updateData), `update(${name})`);
+      markCloudOk();
       return { _id: docId, ...data };
     } catch (err) {
+      markCloudFail(err.message);
       console.warn('[云数据库] update失败，降级为文件存储:', err.message);
     }
   }
@@ -208,9 +256,11 @@ async function remove(name, docId) {
   if (cloudAvailable()) {
     try {
       const col = getCloudCollection(name);
-      await col.doc(String(docId)).remove();
+      await wrapCloud(col.doc(String(docId)).remove(), `remove(${name})`);
+      markCloudOk();
       return { success: true };
     } catch (err) {
+      markCloudFail(err.message);
       console.warn('[云数据库] remove失败，降级为文件存储:', err.message);
     }
   }
@@ -300,7 +350,16 @@ async function importDataFromJson(data) {
   return results;
 }
 
-initCloud();
+Promise.resolve().then(() => initCloud());
+
+const dbInitPromise = Promise.resolve().then(() => initCloud());
+function waitForDb(timeoutMs = 1500) {
+  if (cloudReady) return Promise.resolve(true);
+  return Promise.race([
+    dbInitPromise,
+    new Promise((res) => setTimeout(() => res(false), timeoutMs))
+  ]);
+}
 
 module.exports = {
   COLLECTIONS,
@@ -313,5 +372,7 @@ module.exports = {
   cloudAvailable,
   seedDataFromLocal,
   importDataFromLocal,
-  importDataFromJson
+  importDataFromJson,
+  waitForDb,
+  initCloud
 };
