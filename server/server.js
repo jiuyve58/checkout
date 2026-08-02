@@ -546,11 +546,10 @@ app.put('/api/categories/:id', async (req, res) => {
 app.delete('/api/categories/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let docId = id;
     let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: id });
     if (!cat) cat = await queryOne(COLLECTIONS.CATEGORIES, { id: Number(id) });
-    if (cat) docId = cat._id;
-    await remove(COLLECTIONS.CATEGORIES, docId);
+    if (!cat) return res.status(404).json({ code: 404, message: '分类不存在' });
+    await remove(COLLECTIONS.CATEGORIES, cat._id);
     res.json({ code: 0, message: '删除成功' });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
@@ -676,11 +675,10 @@ app.put('/api/products/:id', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let docId = id;
     let product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
     if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
-    if (product) docId = product._id;
-    await remove(COLLECTIONS.BOOKS, docId);
+    if (!product) return res.status(404).json({ code: 404, message: '商品不存在' });
+    await remove(COLLECTIONS.BOOKS, product._id);
     res.json({ code: 0, message: '删除成功' });
   } catch (err) {
     console.error('删除图书失败:', err);
@@ -694,6 +692,7 @@ app.post('/api/categories/batch-delete', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ code: 400, message: '缺少ID列表' });
     }
+    let ok = 0, fail = 0;
     for (const id of ids) {
       try {
         let docId = id;
@@ -701,9 +700,11 @@ app.post('/api/categories/batch-delete', async (req, res) => {
         if (!cat) cat = await queryOne(COLLECTIONS.CATEGORIES, { id: Number(id) });
         if (cat) docId = cat._id;
         await remove(COLLECTIONS.CATEGORIES, docId);
-      } catch {}
+        ok++;
+      } catch (e) { fail++; }
     }
-    res.json({ code: 0, message: `成功删除 ${ids.length} 条记录` });
+    if (ok === 0) return res.status(404).json({ code: 404, message: '未找到任何可删除的记录' });
+    res.json({ code: 0, message: `成功删除 ${ok} 条记录`, deleted: ok, failed: fail });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
   }
@@ -715,6 +716,7 @@ app.post('/api/products/batch-delete', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ code: 400, message: '缺少ID列表' });
     }
+    let ok = 0, fail = 0;
     for (const id of ids) {
       try {
         let docId = id;
@@ -722,9 +724,11 @@ app.post('/api/products/batch-delete', async (req, res) => {
         if (!p) p = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
         if (p) docId = p._id;
         await remove(COLLECTIONS.BOOKS, docId);
-      } catch {}
+        ok++;
+      } catch (e) { fail++; }
     }
-    res.json({ code: 0, message: `成功删除 ${ids.length} 条记录` });
+    if (ok === 0) return res.status(404).json({ code: 404, message: '未找到任何可删除的记录' });
+    res.json({ code: 0, message: `成功删除 ${ok} 条记录`, deleted: ok, failed: fail });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
   }
@@ -736,6 +740,7 @@ app.post('/api/users/batch-delete', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ code: 400, message: '缺少ID列表' });
     }
+    let ok = 0, fail = 0;
     for (const id of ids) {
       try {
         let docId = id;
@@ -743,9 +748,11 @@ app.post('/api/users/batch-delete', async (req, res) => {
         if (!u) u = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
         if (u) docId = u._id;
         await remove(COLLECTIONS.USERS, docId);
-      } catch {}
+        ok++;
+      } catch (e) { fail++; }
     }
-    res.json({ code: 0, message: `成功删除 ${ids.length} 条记录` });
+    if (ok === 0) return res.status(404).json({ code: 404, message: '未找到任何可删除的记录' });
+    res.json({ code: 0, message: `成功删除 ${ok} 条记录`, deleted: ok, failed: fail });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
   }

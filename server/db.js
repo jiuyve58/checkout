@@ -121,10 +121,13 @@ async function update(name, docId, data) {
 
 async function remove(name, docId) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
-  await Promise.race([
+  const result = await Promise.race([
     getCloudCollection(name).doc(String(docId)).remove(),
     new Promise((_, rej) => setTimeout(() => rej(new Error('remove timeout:' + name)), DB_OP_TIMEOUT))
   ]);
+  if (result && result.removed === 0) {
+    throw new Error('文档不存在或已删除');
+  }
   return { success: true };
 }
 
