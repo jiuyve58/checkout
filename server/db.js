@@ -30,9 +30,15 @@ for (const [k, v] of Object.entries(collectionMap)) {
 function initCloud() {
   if (cloudReady) return true;
   try {
+    console.log('[数据库] 正在初始化云数据库...');
+    console.log('[数据库] TCB_ENV:', process.env.TCB_ENV || '(未设置,使用默认)');
+    console.log('[数据库] SECRETID:', process.env.TENCENTCLOUD_SECRETID ? '已设置' : '未设置');
+    console.log('[数据库] SECRETKEY:', process.env.TENCENTCLOUD_SECRETKEY ? '已设置' : '未设置');
+    console.log('[数据库] SCF_RUNTIME:', process.env.SCF_RUNTIME || '(非云函数)');
+
     const cloudbase = require('@cloudbase/node-sdk');
     const envId = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
-    
+
     const initOptions = { envId };
     if (process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY) {
       initOptions.credentials = {
@@ -40,14 +46,18 @@ function initCloud() {
         secretKey: process.env.TENCENTCLOUD_SECRETKEY
       };
     }
-    
+
+    console.log('[数据库] 正在调用 cloudbase.init...');
     const app = cloudbase.init(initOptions);
+    console.log('[数据库] init 成功,正在获取 database...');
     cloudDb = app.database();
+    console.log('[数据库] database 获取成功');
     cloudReady = true;
     console.log('[数据库] 云数据库连接成功');
     return true;
   } catch (err) {
-    console.warn('[数据库] 云数据库初始化失败，使用文件存储:', err.message);
+    console.error('[数据库] 云数据库初始化失败:', err.message);
+    console.error('[数据库] 错误堆栈:', err.stack);
     cloudReady = false;
     return false;
   }

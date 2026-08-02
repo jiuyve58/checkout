@@ -19,7 +19,14 @@ app.get('/health', (req, res) => {
     status: 'ok',
     time: new Date().toISOString(),
     db_mode: cloudAvailable() ? 'cloud' : 'file',
-    cloud_env: process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff'
+    cloud_env: process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff',
+    env_vars: {
+      TCB_ENV: process.env.TCB_ENV || '(not set)',
+      TENCENTCLOUD_SECRETID: process.env.TENCENTCLOUD_SECRETID ? 'set' : 'not set',
+      TENCENTCLOUD_SECRETKEY: process.env.TENCENTCLOUD_SECRETKEY ? 'set' : 'not set',
+      SCF_RUNTIME: process.env.SCF_RUNTIME || '(not scf)',
+      TENCENTCLOUD_RUNENV: process.env.TENCENTCLOUD_RUNENV || '(not set)'
+    }
   });
 });
 
