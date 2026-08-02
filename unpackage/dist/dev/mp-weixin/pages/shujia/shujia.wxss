@@ -1,0 +1,311 @@
+/**
+ * 这里是uni-app内置的常用样式变量
+ *
+ * uni-app 官方扩展插件及插件市场（https://ext.dcloud.net.cn）上很多三方插件均使用了这些样式变量
+ * 如果你是插件开发者，建议你使用scss预处理，并在插件代码中直接使用这些变量（无需 import 这个文件），方便用户通过搭积木的方式开发整体风格一致的App
+ *
+ */
+/**
+ * 如果你是App开发者（插件使用者），你可以通过修改这些变量来定制自己的插件主题，实现自定义主题功能
+ *
+ * 如果你的项目同样使用了scss预处理，你也可以直接在你的 scss 代码中使用如下变量，同时无需 import 这个文件
+ */
+/* 颜色变量 */
+/* 行为相关颜色 */
+/* 文字基本颜色 */
+/* 背景颜色 */
+/* 边框颜色 */
+/* 尺寸变量 */
+/* 文字尺寸 */
+/* 图片尺寸 */
+/* Border Radius */
+/* 水平间距 */
+/* 垂直间距 */
+/* 透明度 */
+/* 文章场景相关 */
+.page-container {
+  width: 100%;
+  height: 100vh;
+  background-color: #FAFAF8;
+  display: flex;
+  flex-direction: column;
+}
+.header-area {
+  padding: 50px 24px 20px;
+  background: linear-gradient(180deg, #F2ECE0 0%, #FAFAF8 85%);
+}
+.page-label {
+  font-size: 13px;
+  color: #8B7355;
+  letter-spacing: 2px;
+  font-weight: 500;
+}
+.page-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: #3D2817;
+  display: block;
+  margin-top: 6px;
+  margin-bottom: 20px;
+}
+.stats-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  background-color: #FFFFFF;
+  border-radius: 16px;
+  padding: 18px 16px;
+  box-shadow: 0 2px 16px rgba(60, 40, 20, 0.05);
+}
+.stat-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.stat-num {
+  font-size: 26px;
+  font-weight: 700;
+  color: #3D2817;
+  line-height: 1.2;
+}
+.stat-unit {
+  font-size: 12px;
+  color: #8B7355;
+  margin-top: 4px;
+}
+.stat-divider {
+  width: 1px;
+  height: 30px;
+  background-color: #E8DFD0;
+}
+.content-area {
+  flex: 1;
+  padding: 0 24px;
+}
+.section {
+  margin-top: 24px;
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.section-symbol {
+  font-size: 18px;
+  color: #8B5A2B;
+  font-weight: 700;
+  margin-right: 4px;
+}
+.section-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: #3D2817;
+}
+.borrow-card {
+  display: flex;
+  gap: 14px;
+  background-color: #FFFFFF;
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 16px rgba(60, 40, 20, 0.05);
+}
+.borrow-cover {
+  width: 80px;
+  height: 105px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background-color: #E8DFD0;
+}
+.borrow-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.borrow-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #3D2817;
+  display: block;
+}
+.borrow-author {
+  font-size: 13px;
+  color: #8B7355;
+  display: block;
+  margin-top: 2px;
+}
+.borrow-date {
+  font-size: 12px;
+  color: #B0A89E;
+  display: block;
+  margin-top: 6px;
+}
+.borrow-tags {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.tag-expire {
+  background-color: rgba(245, 197, 66, 0.15);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.tag-expire-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: #D4A017;
+}
+.tag-date {
+  background-color: rgba(139, 90, 43, 0.1);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.tag-date-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8B5A2B;
+}
+.tag-reserved {
+  background-color: rgba(46, 213, 115, 0.15);
+  padding: 4px 10px;
+  border-radius: 6px;
+  margin-top: 8px;
+  align-self: flex-start;
+}
+.tag-reserved-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #27AE60;
+}
+.wish-scroll {
+  white-space: nowrap;
+}
+.wish-list {
+  display: flex;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+.wish-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 90px;
+  flex-shrink: 0;
+}
+.wish-cover-wrap {
+  width: 90px;
+  height: 120px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: #E8DFD0;
+  margin-bottom: 8px;
+  box-shadow: 0 4px 14px rgba(60, 40, 20, 0.08);
+}
+.wish-cover {
+  width: 100%;
+  height: 100%;
+}
+.wish-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #3D2817;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 80px 0;
+}
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+.empty-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: #3D2817;
+  margin-bottom: 8px;
+}
+.empty-hint {
+  font-size: 13px;
+  color: #B0A89E;
+  margin-bottom: 20px;
+}
+.login-btn {
+  background: linear-gradient(135deg, #3D2817 0%, #5C3A1F 100%);
+  border-radius: 24px;
+  padding: 10px 36px;
+}
+.login-btn-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+.return-btn {
+  background: linear-gradient(135deg, #8B5A2B 0%, #A0522D 100%);
+  border-radius: 12px;
+  padding: 8px 16px;
+  align-self: center;
+  flex-shrink: 0;
+}
+.return-btn-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+.bottom-space {
+  height: 120px;
+}
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 72px;
+  background-color: #FFFFFF;
+  display: flex;
+  justify-content: space-around;
+  align-items: flex-start;
+  padding: 8px 16px 16px;
+  z-index: 50;
+  box-shadow: 0 -2px 24px rgba(60, 40, 20, 0.06);
+  border-radius: 24px 24px 0 0;
+}
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: 4px;
+  position: relative;
+}
+.nav-item.active .nav-label {
+  color: #3D2817;
+  font-weight: 600;
+}
+.nav-item.active .nav-icon {
+  opacity: 1;
+}
+.nav-icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 2px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.center-icon {
+  width: 28px;
+  height: 28px;
+}
+.nav-label {
+  font-size: 11px;
+  color: #B0A89E;
+  transition: color 0.15s ease;
+}

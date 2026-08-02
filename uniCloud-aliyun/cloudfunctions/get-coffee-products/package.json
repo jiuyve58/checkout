@@ -1,0 +1,7 @@
+{
+  "name": "get-coffee-products",
+  "dependencies": {},
+  "extensions": {
+    "uni-cloud-jql": {}
+  }
+}

@@ -1,0 +1,419 @@
+{
+  "name": "uni-starter",
+  "type": "directory",
+  "children": [
+    {
+      "name": "uniCloud",
+      "type": "directory",
+      "children": [
+        {
+          "name": "cloudfunctions",
+          "type": "directory",
+          "description": "云函数目录",
+          "children": [
+            {
+              "name": "common",
+              "type": "directory",
+              "description": "公共模块",
+              "children": [
+                {
+                  "name": "uni-config-center",
+                  "type": "directory",
+                  "description": "uni-starter的服务端配置中心，项目所有云函数的配置在这里填写",
+                  "children": [
+                    {
+                      "name": "index.js",
+                      "type": "file",
+                      "description": "config-center入口文件"
+                    },
+                    {
+                      "name": "uni-id",
+                      "type": "directory",
+                      "description": "uni-id模块配置目录",
+                      "children": [
+                        {
+                          "name": "config.json",
+                          "type": "file",
+                          "description": "uni-id对应的配置数据：微信登录、一键登录、短信验证码登录等key都在这里填写"
+                        },
+                        {
+                          "name": "file.cert",
+                          "type": "file",
+                          "description": "uni-id依赖的配置文件,假如你使用微信发红包功能，需要的证书文件就是放到这里"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "uni-id",
+                  "type": "directory",
+                  "description": "uni-id用户体系"
+                }
+              ]
+            },
+            {
+              "name": "check-version",
+              "type": "directory",
+              "description": "检查更新云函数"
+            },
+            {
+              "name": "rewarded-video-ad-notify-url",
+              "type": "directory",
+              "description": "签到插件广告回调"
+            },
+            {
+              "name": "uni-analyse-searchhot",
+              "type": "directory",
+              "description": "云端一体搜索模板依赖的云函数"
+            },
+            {
+              "name": "uni-captcha-co",
+              "type": "directory",
+              "description": "云端一体图形验证码组件云对象"
+            },
+            {
+              "name": "uni-clientDB-actions",
+              "type": "directory",
+              "description": "客户端直接操作数据库拦截逻辑"
+            },
+            {
+              "name": "uni-open-bridge",
+              "type": "directory",
+              "description": "统一接管微信等三方平台认证的开源库"
+            },
+            {
+              "name": "upgrade-center",
+              "type": "directory",
+              "description": "云端一体uni升级中心的云函数"
+            },
+            {
+              "name": "uni-id-co",
+              "type": "directory",
+              "description": "用户中心云函数，实现用户注册、修改密码、发送验证码、快捷登录（微信、短信、账户、一键登录）"
+            }
+          ]
+        },
+        {
+          "name": "database",
+          "type": "directory",
+          "description": "云数据目录",
+          "children": [
+            {
+              "name": "db_init.json",
+              "type": "file",
+              "description": "db_init.json初始化数据库文件，其中不再包含schema"
+            },
+            {
+              "name": "opendb-app-versions.schema.json",
+              "type": "file",
+              "description": "应用版本，表结构文件"
+            },
+            {
+              "name": "opendb-banner.schema.json",
+              "type": "file",
+              "description": "横幅数据表，表结构文件"
+            },
+            {
+              "name": "opendb-feedback.schema.json",
+              "type": "file",
+              "description": "意见反馈表，表结构文件"
+            },
+            {
+              "name": "opendb-news-articles.schema.json",
+              "type": "file",
+              "description": "新闻文章表，表结构文件"
+            },
+            {
+              "name": "opendb-news-categories.schema.json",
+              "type": "file",
+              "description": "新闻分类表，表结构文件"
+            },
+            {
+              "name": "opendb-news-comments.schema.json",
+              "type": "file",
+              "description": "新闻评论表，表结构文件"
+            },
+            {
+              "name": "opendb-news-favorite.schema.json",
+              "type": "file",
+              "description": "新闻收藏表，表结构文件"
+            },
+            {
+              "name": "opendb-search-hot.schema.json",
+              "type": "file",
+              "description": "热门搜索表，表结构文件"
+            },
+            {
+              "name": "opendb-search-log.schema.json",
+              "type": "file",
+              "description": "搜索记录表，表结构文件"
+            },
+            {
+              "name": "opendb-verify-codes.schema.json",
+              "type": "file",
+              "description": "验证码表，表结构文件"
+            },
+            {
+              "name": "uni-id-log.schema.json",
+              "type": "file",
+              "description": "登录日志表，表结构文件"
+            },
+            {
+              "name": "uni-id-scores.schema.json",
+              "type": "file",
+              "description": "用户积分表，表结构文件"
+            },
+            {
+              "name": "uni-id-users.schema.json",
+              "type": "file",
+              "description": "用户表，表结构文件"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pages",
+      "type": "directory",
+      "description": "业务页面文件存放的目录",
+      "children": [
+        {
+          "name": "common",
+          "type": "directory",
+          "children": [
+            {
+              "name": "webview",
+              "type": "directory",
+              "description": "webview目录",
+              "children": [
+                {
+                  "name": "webview.vue",
+                  "type": "file",
+                  "description": "webview页面，用于实现跨端的web页面浏览"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "grid",
+          "type": "directory",
+          "children": [
+            {
+              "name": "grid.vue",
+              "type": "file",
+              "description": "带宫格和banner的示例页面"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "type": "directory",
+          "children": [
+            {
+              "name": "list.vue",
+              "type": "file",
+              "description": "新闻列表"
+            },
+            {
+              "name": "search",
+              "type": "directory",
+              "children": [
+                {
+                  "name": "search",
+                  "type": "file",
+                  "description": "云端一体搜索插件"
+                }
+              ]
+            },
+            {
+              "name": "detail.vue",
+              "type": "file",
+              "description": "新闻详情"
+            }
+          ]
+        },
+        {
+          "name": "ucenter",
+          "type": "directory",
+          "children": [
+            {
+              "name": "about",
+              "type": "directory",
+              "description": "关于我们",
+              "children": [
+                {
+                  "name": "about",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "login-page",
+              "type": "directory",
+              "description": "登录模块"
+            },
+            {
+              "name": "read-news-log",
+              "type": "directory",
+              "description": "新闻阅读记录",
+              "children": [
+                {
+                  "name": "read-news-log",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "invite",
+              "type": "directory",
+              "description": "带用户inviteCode参数的应用下载页",
+              "children": [
+                {
+                  "name": "invite",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "settings",
+              "type": "directory",
+              "children": [
+                {
+                  "name": "dc-push",
+                  "type": "directory",
+                  "children": [
+                    {
+                      "name": "push.js",
+                      "type": "file",
+                      "description": "push权限操作SDK"
+                    }
+                  ]
+                },
+                {
+                  "name": "settings.vue",
+                  "type": "file",
+                  "description": "app设置"
+                }
+              ]
+            },
+            {
+              "name": "userinfo",
+              "type": "directory",
+              "description": "用户个人信息",
+              "children": [
+                {
+                  "name": "bind-mobile",
+                  "type": "directory",
+                  "children": [
+                    {
+                      "name": "bind-mobile.vue",
+                      "type": "file",
+                      "description": "绑定手机号码"
+                    }
+                  ]
+                },
+                {
+                  "name": "limeClipper",
+                  "type": "directory",
+                  "description": "图片裁剪插件,来源limeClipper",
+                  "children": [
+                    {
+                      "name": "images",
+                      "type": "directory",
+                      "children": [
+                        {
+                          "name": "photo.svg",
+                          "type": "file"
+                        },
+                        {
+                          "name": "rotate.svg",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "index.css",
+                      "type": "file"
+                    },
+                    {
+                      "name": "limeClipper.vue",
+                      "type": "file"
+                    },
+                    {
+                      "name": "README.md",
+                      "type": "file"
+                    },
+                    {
+                      "name": "utils.js",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "main.js",
+                  "type": "file"
+                },
+                {
+                  "name": "cropImage.vue",
+                  "type": "file",
+                  "description": "引用limeClipper的图片裁剪模块"
+                },
+                {
+                  "name": "userinfo.vue",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "ucenter.vue",
+              "type": "file",
+              "description": "用户中心"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "static",
+      "type": "directory",
+      "description": "存放应用引用的本地静态资源（如图片、视频等）的目录"
+    },
+    {
+      "name": "uni_modules",
+      "type": "directory",
+      "description": "存放uni_modules规范的插件"
+    },
+    {
+      "name": "uni_modules_tools",
+      "type": "directory",
+      "description": "uni_modules插件上传辅助脚本"
+    },
+    {
+      "name": "main.js",
+      "type": "file",
+      "description": "Vue初始化入口文件"
+    },
+    {
+      "name": "App.vue",
+      "type": "file",
+      "description": "应用配置，用来配置App全局样式以及监听应用生命周期"
+    },
+    {
+      "name": "uni-starter.config",
+      "type": "file",
+      "description": "uni-starter的前端的配置文件，项目所有模块的配置在这里填写"
+    },
+    {
+      "name": "manifest.json",
+      "type": "file",
+      "description": "配置应用名称、appid、logo、版本等打包信息"
+    },
+    {
+      "name": "pages.json",
+      "type": "file",
+      "description": "配置页面路由、导航条、选项卡等页面类信息"
+    }
+  ]
+}

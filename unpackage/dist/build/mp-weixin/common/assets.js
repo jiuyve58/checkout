@@ -1,0 +1,1 @@
+"use strict";exports._imports_0="/static/logo.png",exports._imports_0$1="/static/avatar-placeholder.png",exports._imports_1="/static/nav/home.png",exports._imports_2="/static/nav/library.png",exports._imports_3="/static/nav/shelf.png",exports._imports_4="/static/nav/history.png",exports._imports_5="/static/nav/profile.png";

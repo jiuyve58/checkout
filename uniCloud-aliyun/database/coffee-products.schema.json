@@ -1,0 +1,57 @@
+{
+	"bsonType": "object",
+	"required": ["name", "price", "category_id"],
+	"permission": {
+		"read": true,
+		"create": false,
+		"update": false,
+		"delete": false
+	},
+	"properties": {
+		"_id": {
+			"description": "ID，系统自动生成"
+		},
+		"name": {
+			"bsonType": "string",
+			"description": "商品名称",
+			"title": "商品名称"
+		},
+		"description": {
+			"bsonType": "string",
+			"description": "商品描述",
+			"title": "商品描述"
+		},
+		"price": {
+			"bsonType": "double",
+			"description": "商品价格",
+			"title": "商品价格"
+		},
+		"image": {
+			"bsonType": "string",
+			"description": "商品图片URL",
+			"title": "商品图片"
+		},
+		"category_id": {
+			"bsonType": "string",
+			"description": "所属分类ID",
+			"title": "所属分类",
+			"foreignKey": "coffee-categories._id"
+		},
+		"on_sale": {
+			"bsonType": "bool",
+			"description": "是否在售",
+			"title": "是否在售",
+			"defaultValue": true
+		},
+		"rating": {
+			"bsonType": "double",
+			"description": "评分(0-5)",
+			"title": "评分",
+			"defaultValue": 0,
+			"validation": {
+				"minimum": 0,
+				"maximum": 5
+			}
+		}
+	}
+}
