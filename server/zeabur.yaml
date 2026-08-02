@@ -1,0 +1,8 @@
+service:
+  name: zxc-book-api
+  description: 图书管理系统API服务
+  buildCommand: npm install
+  startCommand: node server.js
+  env:
+    NODE_ENV: production
+    ZEABUR: "1"

@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>图书管理后台</title>
+	<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+	<style>
+		* { margin: 0; padding: 0; box-sizing: border-box; }
+		body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
+		
+		.container { display: flex; min-height: 100vh; }
+		
+		.sidebar {
+			width: 240px;
+			background: linear-gradient(135deg, #583732 0%, #8B6914 100%);
+			color: #fff;
+			padding: 20px 0;
+		}
+		.sidebar h1 { font-size: 20px; padding: 0 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.2); }
+		.sidebar .menu-item {
+			padding: 14px 20px;
+			cursor: pointer;
+			transition: background 0.3s;
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+		.sidebar .menu-item:hover { background: rgba(255,255,255,0.1); }
+		.sidebar .menu-item.active { background: rgba(255,255,255,0.2); }
+		.sidebar .menu-icon { font-size: 18px; }
+		
+		.main { flex: 1; padding: 30px; overflow-x: auto; }
+		.main h2 { color: #583732; margin-bottom: 20px; }
+		
+		.toolbar {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 20px;
+		}
+		
+		.btn {
+			padding: 10px 20px;
+			border: none;
+			border-radius: 8px;
+			cursor: pointer;
+			font-size: 14px;
+			transition: all 0.3s;
+			font-weight: 500;
+		}
+		.btn-primary { background: #583732; color: #fff; }
+		.btn-primary:hover { background: #4a2d28; }
+		.btn-success { background: #4CAF50; color: #fff; }
+		.btn-success:hover { background: #45a049; }
+		.btn-warning { background: #FF9800; color: #fff; }
+		.btn-warning:hover { background: #f57c00; }
+		.btn-danger { background: #f44336; color: #fff; }
+		.btn-danger:hover { background: #d32f2f; }
+		.btn-secondary { background: #9E9E9E; color: #fff; }
+		.btn-secondary:hover { background: #757575; }
+		.btn-sm { padding: 6px 12px; font-size: 12px; }
+		
+		.search-box {
+			padding: 10px 16px;
+			border: 1px solid #ddd;
+			border-radius: 8px;
+			font-size: 14px;
+			width: 250px;
+		}
+		
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			background: #fff;
+			border-radius: 12px;
+			overflow: hidden;
+			box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+		}
+		thead { background: #583732; color: #fff; }
+		th { padding: 14px 16px; text-align: left; font-weight: 500; font-size: 14px; }
+		td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+		tr:hover td { background: #fafafa; }
+		
+		.product-img {
+			width: 50px;
+			height: 50px;
+			border-radius: 8px;
+			object-fit: cover;
+		}
+		.cover-editor {
+			display: flex;
+			align-items: center;
+			gap: 18px;
+			padding: 14px;
+			border: 1px solid #ddd;
+			border-radius: 10px;
+			background: #fafafa;
+		}
+		.cover-preview {
+			width: 110px;
+			height: 150px;
+			border-radius: 8px;
+			object-fit: cover;
+			background: #eee;
+		}
+		.cover-actions {
+			display: flex;
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 10px;
+		}
+		.cover-file-input { display: none; }
+		.cover-upload-disabled {
+			opacity: 0.6;
+			pointer-events: none;
+		}
+		
+		.badge {
+			display: inline-block;
+			padding: 4px 10px;
+			border-radius: 12px;
+			font-size: 12px;
+			font-weight: 500;
+		}
+		.badge-success { background: #E8F5E9; color: #4CAF50; }
+		.badge-warning { background: #FFF3E0; color: #FF9800; }
+		.badge-danger { background: #FFEBEE; color: #f44336; }
+		
+		.modal-overlay {
+			position: fixed;
+			top: 0; left: 0; right: 0; bottom: 0;
+			background: rgba(0,0,0,0.5);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 1000;
+		}
+		.modal {
+			background: #fff;
+			border-radius: 16px;
+			padding: 28px;
+			width: 500px;
+			max-height: 90vh;
+			overflow-y: auto;
+		}
+		.modal h3 { color: #583732; margin-bottom: 20px; }
+		
+		.form-group { margin-bottom: 16px; }
+		.form-group label {
+			display: block;
+			margin-bottom: 6px;
+			font-weight: 500;
+			color: #333;
+			font-size: 14px;
+		}
+		.form-group input,
+		.form-group select,
+		.form-group textarea {
+			width: 100%;
+			padding: 10px 14px;
+			border: 1px solid #ddd;
+			border-radius: 8px;
+			font-size: 14px;
+			font-family: inherit;
+		}
+		.form-group textarea { resize: vertical; min-height: 80px; }
+		.form-group input:focus,
+		.form-group select:focus,
+		.form-group textarea:focus {
+			outline: none;
+			border-color: #583732;
+		}
+		
+		.modal-actions {
+			display: flex;
+			justify-content: flex-end;
+			gap: 10px;
+			margin-top: 24px;
+		}
+		
+		.toast {
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			padding: 14px 24px;
+			border-radius: 8px;
+			color: #fff;
+			font-size: 14px;
+			z-index: 2000;
+			animation: slideIn 0.3s ease-out;
+		}
+		.toast-success { background: #4CAF50; }
+		.toast-error { background: #f44336; }
+		.toast-info { background: #2196F3; }
+		
+		@keyframes slideIn {
+			from { transform: translateX(100%); opacity: 0; }
+			to { transform: translateX(0); opacity: 1; }
+		}
+		
+		.empty-state {
+			text-align: center;
+			padding: 60px 20px;
+			color: #999;
+		}
+		.empty-state .icon { font-size: 60px; margin-bottom: 16px; }
+		
+		.checkbox-col { width: 40px; text-align: center; }
+		.checkbox-col input { cursor: pointer; width: 16px; height: 16px; }
+		.batch-bar {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+		}
+		.batch-bar .count {
+			color: #666;
+			font-size: 13px;
+		}
+		
+		.tab-content { display: none; }
+		.tab-content.active { display: block; }
+		
+		.actions { display: flex; gap: 8px; }
+		
+		.badge {
+			display: inline-block;
+			padding: 4px 10px;
+			border-radius: 12px;
+			font-size: 12px;
+			font-weight: 500;
+		}
+		.badge-success { background: #4CAF50; color: #fff; }
+		.badge-danger { background: #f44336; color: #fff; }
+		.badge-warning { background: #FF9800; color: #fff; }
+		.badge-info { background: #2196F3; color: #fff; }
+		
+		.user-detail-section {
+			margin-bottom: 24px;
+			padding-bottom: 16px;
+			border-bottom: 1px solid #f0f0f0;
+		}
+		.user-detail-section:last-child { border-bottom: none; }
+		.user-detail-section h4 {
+			color: #583732;
+			margin-bottom: 12px;
+			font-size: 15px;
+		}
+		.user-info-grid {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 10px 20px;
+		}
+		.user-info-grid .label {
+			color: #909399;
+			font-size: 13px;
+		}
+		.user-info-grid div {
+			font-size: 14px;
+			color: #333;
+		}
+		
+		.toast {
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			padding: 12px 24px;
+			border-radius: 8px;
+			color: #fff;
+			font-size: 14px;
+			z-index: 1000;
+			box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+		}
+		.toast-success { background: #4CAF50; }
+		.toast-error { background: #f44336; }
+	</style>
+</head>
+<body>
+<div id="app">
+	<div class="container">
+		<div class="sidebar">
+			<h1>图书管理后台</h1>
+			<div class="menu-item" :class="{ active: activeTab === 'categories' }" @click="activeTab = 'categories'">
+				<span class="menu-icon">📁</span> 分类管理
+			</div>
+			<div class="menu-item" :class="{ active: activeTab === 'products' }" @click="activeTab = 'products'">
+				<span class="menu-icon">书</span> 图书管理
+			</div>
+			<div class="menu-item" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">
+				<span class="menu-icon">👥</span> 用户管理
+			</div>
+			<div class="menu-item" :class="{ active: activeTab === 'borrow' }" @click="activeTab = 'borrow'">
+				<span class="menu-icon">📖</span> 借阅记录
+			</div>
+		</div>
+		
+		<div class="main">
+			<div class="tab-content" :class="{ active: activeTab === 'categories' }">
+				<h2>分类管理</h2>
+				<div class="toolbar">
+					<div class="batch-bar">
+						<button class="btn btn-danger" v-if="selectedCatIds.length > 0" @click="batchDelete('categories')">
+							批量删除 ({{ selectedCatIds.length }})
+						</button>
+						<button class="btn btn-secondary btn-sm" v-if="selectedCatIds.length > 0" @click="selectedCatIds = []">取消选择</button>
+						<span class="count" v-if="selectedCatIds.length > 0">已选 {{ selectedCatIds.length }} 项</span>
+					</div>
+					<div style="display: flex; gap: 12px;">
+						<input type="text" class="search-box" v-model="categorySearch" placeholder="搜索分类名称...">
+						<button class="btn btn-primary" @click="openCategoryModal()">+ 新增分类</button>
+					</div>
+				</div>
+				<table v-if="filteredCategories.length > 0">
+					<thead>
+						<tr>
+							<th class="checkbox-col"><input type="checkbox" :checked="selectedCatIds.length === filteredCategories.length && filteredCategories.length > 0" @change="toggleSelectAll('categories', $event)"></th>
+							<th>ID</th>
+							<th>分类名称</th>
+							<th>排序</th>
+							<th>状态</th>
+							<th>操作</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="item in filteredCategories" :key="item._id">
+							<td class="checkbox-col"><input type="checkbox" :value="item._id" v-model="selectedCatIds"></td>
+							<td>{{ item._id }}</td>
+							<td>{{ item.name }}</td>
+							<td>{{ item.sort }}</td>
+							<td>
+								<span class="badge" :class="item.enabled ? 'badge-success' : 'badge-danger'">
+									{{ item.enabled ? '启用' : '禁用' }}
+								</span>
+							</td>
+							<td>
+								<div class="actions">
+									<button class="btn btn-warning btn-sm" @click="openCategoryModal(item)">编辑</button>
+									<button class="btn btn-danger btn-sm" @click="deleteCategory(item)">删除</button>
+								</div>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+				<div v-else class="empty-state">
+					<div class="icon">📁</div>
+					<p>暂无分类数据</p>
+				</div>
+			</div>
+			
+			<div class="tab-content" :class="{ active: activeTab === 'products' }">
+				<h2>图书管理</h2>
+				<div class="toolbar">
+					<div class="batch-bar">
+						<button class="btn btn-danger" v-if="selectedProdIds.length > 0" @click="batchDelete('products')">
+							批量删除 ({{ selectedProdIds.length }})
+						</button>
+						<button class="btn btn-secondary btn-sm" v-if="selectedProdIds.length > 0" @click="selectedProdIds = []">取消选择</button>
+						<span class="count" v-if="selectedProdIds.length > 0">已选 {{ selectedProdIds.length }} 项</span>
+					</div>
+					<div style="display: flex; gap: 12px;">
+						<input type="text" class="search-box" v-model="productSearch" placeholder="搜索图书名称...">
+						<select class="search-box" v-model="productCategoryFilter" style="width: 150px;">
+							<option value="">全部分类</option>
+							<option v-for="cat in categories" :key="cat._id" :value="cat._id">{{ cat.name }}</option>
+						</select>
+						<button class="btn btn-primary" @click="openProductModal()">+ 新增图书</button>
+					</div>
+				</div>
+				<table v-if="filteredProducts.length > 0">
+					<thead>
+						<tr>
+							<th class="checkbox-col"><input type="checkbox" :checked="selectedProdIds.length === filteredProducts.length && filteredProducts.length > 0" @change="toggleSelectAll('products', $event)"></th>
+							<th>图片</th>
+							<th>图书名称</th>
+							<th>描述</th>
+							<th>价格</th>
+							<th>分类</th>
+							<th>评分</th>
+							<th>状态</th>
+							<th>操作</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="item in filteredProducts" :key="item._id">
+							<td class="checkbox-col"><input type="checkbox" :value="item._id" v-model="selectedProdIds"></td>
+							<td>
+								<img v-if="item.image" :src="item.image" class="product-img" @click="previewImage(item.image)">
+							<div v-else style="width: 50px; height: 50px; background: #eee; border-radius: 8px; display: flex; align-items: center; justify-content: center;">书</div>
+							</td>
+							<td>{{ item.name }}</td>
+							<td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ item.description }}</td>
+							<td>Rp. {{ formatPrice(item.price) }}</td>
+							<td>{{ getCategoryName(item.category_id) }}</td>
+							<td>{{ item.rating }} ⭐</td>
+							<td>
+								<span class="badge" :class="item.on_sale ? 'badge-success' : 'badge-warning'">
+									{{ item.on_sale ? '在售' : '下架' }}
+								</span>
+							</td>
+							<td>
+								<div class="actions">
+									<button class="btn btn-warning btn-sm" @click="openProductModal(item)">编辑</button>
+									<button class="btn btn-danger btn-sm" @click="deleteProduct(item)">删除</button>
+								</div>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+				<div v-else class="empty-state">
+					<div class="icon">书</div>
+					<p>暂无图书数据</p>
+				</div>
+			</div>
+			
+			<div class="tab-content" :class="{ active: activeTab === 'users' }">
+				<h2>用户管理</h2>
+				<div class="toolbar">
+					<div class="batch-bar">
+						<button class="btn btn-danger" v-if="selectedUserIds.length > 0" @click="batchDelete('users')">
+							批量删除 ({{ selectedUserIds.length }})
+						</button>
+						<button class="btn btn-secondary btn-sm" v-if="selectedUserIds.length > 0" @click="selectedUserIds = []">取消选择</button>
+						<span class="count" v-if="selectedUserIds.length > 0">已选 {{ selectedUserIds.length }} 项</span>
+					</div>
+					<div style="display: flex; gap: 12px;">
+						<input type="text" class="search-box" v-model="userSearch" placeholder="搜索用户名/昵称...">
+						<select class="search-box" v-model="userStatusFilter" style="width: 150px;">
+							<option value="">全部状态</option>
+							<option value="active">正常</option>
+							<option value="disabled">已禁用</option>
+						</select>
+					</div>
+				</div>
+				<table v-if="filteredUsers.length > 0">
+					<thead>
+						<tr>
+							<th class="checkbox-col"><input type="checkbox" :checked="selectedUserIds.length === filteredUsers.length && filteredUsers.length > 0" @change="toggleSelectAll('users', $event)"></th>
+							<th>用户ID</th>
+							<th>用户名</th>
+							<th>昵称</th>
+							<th>注册时间</th>
+							<th>借阅中</th>
+							<th>登录次数</th>
+							<th>状态</th>
+							<th>操作</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="item in filteredUsers" :key="item.id">
+							<td class="checkbox-col"><input type="checkbox" :value="item.id" v-model="selectedUserIds"></td>
+							<td style="font-family: monospace; font-size: 12px;">{{ item.id }}</td>
+							<td>{{ item.username }}</td>
+							<td>{{ item.nickname }}</td>
+							<td>{{ formatDate(item.created_at) }}</td>
+							<td>
+								<span v-if="item.borrow_count > 0" style="color: #f44336; font-weight: 500;">{{ item.borrow_count }} 本</span>
+								<span v-else style="color: #999;">-</span>
+							</td>
+							<td>{{ item.login_count }}</td>
+							<td>
+								<span class="badge" :class="item.status === 'active' ? 'badge-success' : 'badge-danger'">
+									{{ item.status === 'active' ? '正常' : '已禁用' }}
+								</span>
+							</td>
+							<td>
+								<div class="actions">
+									<button class="btn btn-sm" :class="item.status === 'active' ? 'btn-warning' : 'btn-success'" @click="toggleUserStatus(item)">
+										{{ item.status === 'active' ? '禁用' : '启用' }}
+									</button>
+									<button class="btn btn-warning btn-sm" @click="openUserDetail(item)">详情</button>
+								</div>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+				<div v-else class="empty-state">
+					<div class="icon">👥</div>
+					<p>暂无用户数据</p>
+				</div>
+			</div>
+			
+			<div class="tab-content" :class="{ active: activeTab === 'borrow' }">
+				<h2>书籍借阅记录</h2>
+				<div class="toolbar">
+					<div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+						<div class="batch-bar">
+							<button class="btn btn-danger" v-if="selectedBorrowIds.length > 0" @click="batchDelete('borrow-records')">
+								批量删除 ({{ selectedBorrowIds.length }})
+							</button>
+							<button class="btn btn-secondary btn-sm" v-if="selectedBorrowIds.length > 0" @click="selectedBorrowIds = []">取消选择</button>
+							<span class="count" v-if="selectedBorrowIds.length > 0">已选 {{ selectedBorrowIds.length }} 项</span>
+						</div>
+						<input type="text" class="search-box" v-model="borrowSearch" placeholder="搜索书名/借阅者/编号...">
+						<select class="search-box" v-model="borrowStatusFilter" style="width: 150px;">
+							<option value="">全部状态</option>
+							<option value="borrowed">借阅中</option>
+							<option value="returned">已归还</option>
+							<option value="overdue">已逾期</option>
+						</select>
+						<button class="btn btn-primary" @click="fetchBorrowRecords">刷新</button>
+						<span style="color: #666; font-size: 13px;">共 {{ filteredBorrowRecords.length }} 条记录</span>
+					</div>
+				</div>
+				<table v-if="filteredBorrowRecords.length > 0">
+					<thead>
+						<tr>
+							<th class="checkbox-col"><input type="checkbox" :checked="selectedBorrowIds.length === filteredBorrowRecords.length && filteredBorrowRecords.length > 0" @change="toggleSelectAll('borrow-records', $event)"></th>
+							<th>记录ID</th>
+							<th>书名</th>
+							<th>编号</th>
+							<th>借阅者</th>
+							<th>用户ID</th>
+							<th>借阅时间</th>
+							<th>到期时间</th>
+							<th>归还时间</th>
+							<th>状态</th>
+							<th>操作</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="item in filteredBorrowRecords" :key="item._id || item.id">
+							<td class="checkbox-col"><input type="checkbox" :value="item._id || item.id" v-model="selectedBorrowIds"></td>
+							<td style="font-family: monospace; font-size: 12px;">{{ item._id || item.id }}</td>
+							<td>{{ item.product_name || '-' }}</td>
+							<td style="font-family: monospace; font-size: 12px;">{{ item.product_code || '-' }}</td>
+							<td>{{ item.user_name || '-' }}</td>
+							<td style="font-family: monospace; font-size: 12px;">{{ item.user_id || '-' }}</td>
+							<td>{{ formatDate(item.borrow_date) }}</td>
+							<td>
+								<span :style="isOverdue(item) ? 'color: #f44336;' : ''">{{ formatDate(item.due_date) }}</span>
+							</td>
+							<td>{{ item.return_date ? formatDate(item.return_date) : '-' }}</td>
+							<td>
+								<span class="badge" :class="getBorrowBadgeClass(item)">
+									{{ getBorrowStatusText(item) }}
+								</span>
+							</td>
+							<td>
+								<div class="actions">
+									<button v-if="item.status === 'borrowed' || item.status === 'overdue'" class="btn btn-success btn-sm" @click="forceReturn(item)">代归还</button>
+									<span v-else style="color: #999;">-</span>
+								</div>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+				<div v-else class="empty-state">
+					<div class="icon">📖</div>
+					<p>暂无借阅记录</p>
+				</div>
+			</div>
+		</div>
+	</div>
+	
+	<div class="modal-overlay" v-if="showCategoryModal" @click.self="closeCategoryModal">
+		<div class="modal">
+			<h3>{{ editingCategory ? '编辑分类' : '新增分类' }}</h3>
+			<div class="form-group">
+				<label>分类名称</label>
+				<input type="text" v-model="categoryForm.name" placeholder="请输入分类名称">
+			</div>
+			<div class="form-group">
+				<label>排序（数字越小越靠前）</label>
+				<input type="number" v-model.number="categoryForm.sort" placeholder="0">
+			</div>
+			<div class="form-group">
+				<label>状态</label>
+				<select v-model="categoryForm.enabled">
+					<option :value="true">启用</option>
+					<option :value="false">禁用</option>
+				</select>
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-secondary" @click="closeCategoryModal">取消</button>
+				<button class="btn btn-primary" @click="saveCategory">保存</button>
+			</div>
+		</div>
+	</div>
+	
+	<div class="modal-overlay" v-if="showProductModal" @click.self="closeProductModal">
+		<div class="modal" style="width: 600px;">
+			<h3>{{ editingProduct ? '编辑图书' : '新增图书' }}</h3>
+			<div class="form-group">
+				<label>图书名称</label>
+				<input type="text" v-model="productForm.name" placeholder="请输入图书名称">
+			</div>
+			<div class="form-group">
+				<label>图书描述</label>
+				<textarea v-model="productForm.description" placeholder="请输入图书描述"></textarea>
+			</div>
+			<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+				<div class="form-group">
+					<label>价格 (Rp)</label>
+					<input type="number" v-model.number="productForm.price" placeholder="0">
+				</div>
+				<div class="form-group">
+					<label>分类</label>
+					<select v-model="productForm.category_id">
+						<option value="">请选择分类</option>
+						<option v-for="cat in categories" :key="cat._id" :value="cat._id">{{ cat.name }}</option>
+					</select>
+				</div>
+			</div>
+			<div class="form-group">
+				<label>图书封面</label>
+				<div class="cover-editor">
+					<img :src="productCoverPreview" class="cover-preview" alt="图书封面" @error="onProductCoverError">
+					<div class="cover-actions">
+						<input id="product-cover-input" class="cover-file-input" type="file" accept="image/*" @change="uploadProductCover">
+						<label for="product-cover-input" class="btn btn-primary" :class="{ 'cover-upload-disabled': uploadingImage }">
+							{{ uploadingImage ? '上传中...' : (productForm.image ? '更换封面' : '上传封面') }}
+						</label>
+						<span>支持 JPG、PNG，文件不超过 5MB</span>
+					</div>
+				</div>
+			</div>
+			<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+				<div class="form-group">
+					<label>评分 (0-5)</label>
+					<input type="number" v-model.number="productForm.rating" min="0" max="5" step="0.1">
+				</div>
+				<div class="form-group">
+					<label>排序</label>
+					<input type="number" v-model.number="productForm.sort" placeholder="0">
+				</div>
+				<div class="form-group">
+					<label>状态</label>
+					<select v-model="productForm.on_sale">
+						<option :value="true">在售</option>
+						<option :value="false">下架</option>
+					</select>
+				</div>
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-secondary" @click="closeProductModal">取消</button>
+				<button class="btn btn-primary" @click="saveProduct">保存</button>
+			</div>
+		</div>
+	</div>
+	
+	<div class="modal-overlay" v-if="showUserDetail" @click.self="closeUserDetail">
+		<div class="modal" style="max-width: 900px;">
+			<h3>用户详情 - {{ selectedUser.username }}</h3>
+			<div v-if="userDetailLoading" style="text-align: center; padding: 40px; color: #999;">加载中...</div>
+			<div v-else-if="userDetail" style="max-height: 500px; overflow-y: auto;">
+				<div class="user-detail-section">
+					<h4>基本信息</h4>
+					<div class="user-info-grid">
+						<div><span class="label">用户ID：</span><span style="font-family: monospace; font-size: 12px;">{{ userDetail.user.id }}</span></div>
+						<div><span class="label">用户名：</span>{{ userDetail.user.username }}</div>
+						<div><span class="label">昵称：</span>{{ userDetail.user.nickname }}</div>
+						<div><span class="label">邮箱：</span>{{ userDetail.user.email || '-' }}</div>
+						<div><span class="label">手机：</span>{{ userDetail.user.phone || '-' }}</div>
+						<div><span class="label">注册时间：</span>{{ formatDate(userDetail.user.created_at) }}</div>
+						<div><span class="label">状态：</span>
+							<span class="badge" :class="userDetail.user.status === 'active' ? 'badge-success' : 'badge-danger'">
+								{{ userDetail.user.status === 'active' ? '正常' : '已禁用' }}
+							</span>
+						</div>
+					</div>
+				</div>
+				
+				<div class="user-detail-section">
+					<h4>借阅记录 ({{ userDetail.borrow_records.length }})</h4>
+					<table v-if="userDetail.borrow_records.length > 0">
+						<thead>
+							<tr>
+								<th>图书</th>
+								<th>借阅时间</th>
+								<th>到期时间</th>
+								<th>归还时间</th>
+								<th>状态</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr v-for="record in userDetail.borrow_records" :key="record.id">
+								<td>{{ record.product_name }}</td>
+								<td>{{ formatDate(record.borrow_date) }}</td>
+								<td>{{ formatDate(record.due_date) }}</td>
+								<td>{{ record.return_date ? formatDate(record.return_date) : '-' }}</td>
+								<td>
+									<span class="badge" :class="record.status === 'borrowed' ? 'badge-warning' : 'badge-success'">
+										{{ record.status === 'borrowed' ? '借阅中' : '已归还' }}
+									</span>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+					<div v-else style="color: #999; padding: 10px 0;">暂无借阅记录</div>
+				</div>
+				
+				<div class="user-detail-section">
+					<h4>登录记录 ({{ userDetail.login_records.length }})</h4>
+					<table v-if="userDetail.login_records.length > 0">
+						<thead>
+							<tr>
+								<th>方式</th>
+								<th>IP地址</th>
+								<th>客户端</th>
+								<th>登录时间</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr v-for="record in userDetail.login_records" :key="record.id">
+								<td>
+									<span class="badge" :class="record.login_type === 'register' ? 'badge-success' : 'badge-info'">
+										{{ record.login_type === 'register' ? '注册' : '登录' }}
+									</span>
+								</td>
+								<td>{{ record.ip || '-' }}</td>
+								<td :title="record.user_agent">{{ parseDevice(record.user_agent) }}</td>
+								<td>{{ formatDate(record.login_time) }}</td>
+							</tr>
+						</tbody>
+					</table>
+					<div v-else style="color: #999; padding: 10px 0;">暂无登录记录</div>
+				</div>
+			</div>
+			<div class="modal-actions">
+				<button class="btn btn-secondary" @click="closeUserDetail">关闭</button>
+			</div>
+		</div>
+	</div>
+	
+	<div class="toast" v-if="toast.show" :class="'toast-' + toast.type">{{ toast.message }}</div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+const API_BASE = '/api';
+
+const app = createApp({
+	setup() {
+		const activeTab = ref('categories');
+		const categories = ref([]);
+		const products = ref([]);
+		const categorySearch = ref('');
+		const productSearch = ref('');
+		const productCategoryFilter = ref('');
+		
+		const selectedCatIds = ref([]);
+		const selectedProdIds = ref([]);
+		const selectedUserIds = ref([]);
+		const selectedBorrowIds = ref([]);
+		
+		const showCategoryModal = ref(false);
+		const editingCategory = ref(null);
+		const categoryForm = ref({ name: '', sort: 0, enabled: true });
+		
+		const showProductModal = ref(false);
+		const editingProduct = ref(null);
+		const productForm = ref({ name: '', description: '', price: 0, image: '', category_id: '', rating: 0, sort: 0, on_sale: true });
+		const uploadingImage = ref(false);
+		const productCoverError = ref(false);
+		const productCoverPreview = computed(() => {
+			if (productCoverError.value) return '/static/book-placeholder-1.png';
+			return productForm.value.image || '/static/book-placeholder-1.png';
+		});
+		
+		const users = ref([]);
+		const userSearch = ref('');
+		const userStatusFilter = ref('');
+		const showUserDetail = ref(false);
+		const selectedUser = ref(null);
+		const userDetail = ref(null);
+		const userDetailLoading = ref(false);
+		
+		const borrowRecords = ref([]);
+		const borrowSearch = ref('');
+		const borrowStatusFilter = ref('');
+		
+		const toast = ref({ show: false, message: '', type: 'success' });
+		
+		function showToast(message, type = 'success') {
+			toast.value = { show: true, message, type };
+			setTimeout(() => { toast.value.show = false; }, 2500);
+		}
+		
+		const idMap = {
+			'categories': { ids: selectedCatIds, list: filteredCategories },
+			'products': { ids: selectedProdIds, list: filteredProducts },
+			'users': { ids: selectedUserIds, list: filteredUsers },
+			'borrow-records': { ids: selectedBorrowIds, list: filteredBorrowRecords }
+		};
+		const collectionMap = {
+			'categories': 'categories',
+			'products': 'products',
+			'users': 'users',
+			'borrow-records': 'borrow-records'
+		};
+		
+		function toggleSelectAll(key, event) {
+			const target = idMap[key];
+			if (event.target.checked) {
+				target.ids.value = target.list.value.map(item => item._id || item.id);
+			} else {
+				target.ids.value = [];
+			}
+		}
+		
+		async function batchDelete(key) {
+			const target = idMap[key];
+			const ids = [...target.ids.value];
+			if (!ids.length) return;
+			if (!confirm(`确定删除选中的 ${ids.length} 条记录？`)) return;
+			try {
+				const res = await fetch(`${API_BASE}/${collectionMap[key]}/batch-delete`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ ids })
+				}).then(r => r.json());
+				if (res.code === 0) {
+					showToast(res.message || '删除成功');
+					target.ids.value = [];
+					fetchData();
+				} else {
+					showToast(res.message || '删除失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			}
+		}
+		
+		async function fetchData() {
+			try {
+				const [catRes, prodRes, userRes, borrowRes] = await Promise.all([
+					fetch(`${API_BASE}/categories`).then(r => r.json()),
+					fetch(`${API_BASE}/products`).then(r => r.json()),
+					fetch(`${API_BASE}/users`).then(r => r.json()),
+					fetch(`${API_BASE}/borrow-records`).then(r => r.json())
+				]);
+				if (catRes.code === 0) categories.value = catRes.data;
+				if (prodRes.code === 0) products.value = prodRes.data;
+				if (userRes.code === 0) users.value = userRes.data;
+				if (borrowRes.code === 0) borrowRecords.value = borrowRes.data;
+			} catch (err) {
+				showToast('数据加载失败，请确保API服务已启动', 'error');
+			}
+		}
+		
+		const filteredCategories = computed(() => {
+			if (!categorySearch.value) return categories.value;
+			return categories.value.filter(c => c.name.includes(categorySearch.value));
+		});
+		
+		const filteredProducts = computed(() => {
+			let result = products.value;
+			if (productSearch.value) {
+				result = result.filter(p => p.name.includes(productSearch.value));
+			}
+			if (productCategoryFilter.value) {
+				result = result.filter(p => p.category_id === productCategoryFilter.value);
+			}
+			return result;
+		});
+		
+		const filteredUsers = computed(() => {
+			let result = users.value;
+			if (userSearch.value) {
+				const kw = userSearch.value.toLowerCase();
+				result = result.filter(u => 
+					(u.username && u.username.toLowerCase().includes(kw)) ||
+					(u.nickname && u.nickname.toLowerCase().includes(kw))
+				);
+			}
+			if (userStatusFilter.value) {
+				result = result.filter(u => u.status === userStatusFilter.value);
+			}
+			return result;
+		});
+		
+		const filteredBorrowRecords = computed(() => {
+			let result = borrowRecords.value;
+			if (borrowSearch.value) {
+				const kw = borrowSearch.value.toLowerCase();
+				result = result.filter(r =>
+					(r.product_name && r.product_name.toLowerCase().includes(kw)) ||
+					(r.user_name && r.user_name.toLowerCase().includes(kw)) ||
+					(r.product_code && r.product_code.toLowerCase().includes(kw))
+				);
+			}
+			if (borrowStatusFilter.value) {
+				if (borrowStatusFilter.value === 'overdue') {
+					result = result.filter(r => isOverdue(r));
+				} else {
+					result = result.filter(r => r.status === borrowStatusFilter.value && !isOverdue(r));
+				}
+			}
+			return result;
+		});
+		
+		function getCategoryName(categoryId) {
+			const cat = categories.value.find(c => c._id === categoryId);
+			return cat ? cat.name : '-';
+		}
+		
+		function formatPrice(price) {
+			if (!price) return '0';
+			return Number(price).toLocaleString('id-ID');
+		}
+		
+		function formatDate(dateStr) {
+			if (!dateStr) return '-';
+			const d = new Date(dateStr);
+			const pad = n => String(n).padStart(2, '0');
+			return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+		}
+		
+		function parseDevice(ua) {
+			if (!ua) return '-';
+			let os = '未知';
+			if (/Windows/i.test(ua)) os = 'Windows';
+			else if (/Mac OS/i.test(ua)) os = 'Mac';
+			else if (/Android/i.test(ua)) os = 'Android';
+			else if (/iPhone|iPad/i.test(ua)) os = 'iOS';
+			let client = '浏览器';
+			if (/MicroMessenger/i.test(ua)) client = '微信';
+			else if (/Edg/i.test(ua)) client = 'Edge';
+			else if (/Chrome/i.test(ua)) client = 'Chrome';
+			else if (/Firefox/i.test(ua)) client = 'Firefox';
+			return os + '/' + client;
+		}
+		
+		function isOverdue(record) {
+			if (record.status !== 'borrowed') return false;
+			if (!record.due_date) return false;
+			return new Date(record.due_date) < new Date();
+		}
+		
+		function getBorrowBadgeClass(record) {
+			if (isOverdue(record)) return 'badge-danger';
+			if (record.status === 'borrowed') return 'badge-warning';
+			if (record.status === 'returned') return 'badge-success';
+			return 'badge-info';
+		}
+		
+		function getBorrowStatusText(record) {
+			if (isOverdue(record)) return '已逾期';
+			const map = { borrowed: '借阅中', returned: '已归还', overdue: '已逾期' };
+			return map[record.status] || record.status;
+		}
+		
+		async function fetchBorrowRecords() {
+			try {
+				const res = await fetch(`${API_BASE}/borrow-records`).then(r => r.json());
+				if (res.code === 0) {
+					borrowRecords.value = res.data || [];
+				} else {
+					showToast(res.message || '加载借阅记录失败', 'error');
+				}
+			} catch (err) {
+				showToast('加载借阅记录失败', 'error');
+			}
+		}
+		
+		async function forceReturn(item) {
+			const recordId = item._id || item.id;
+			if (!recordId) {
+				showToast('缺少记录ID', 'error');
+				return;
+			}
+			if (!confirm(`确认代归还《${item.product_name}》吗？`)) return;
+			try {
+				const res = await fetch(`${API_BASE}/return`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ record_id: recordId })
+				}).then(r => r.json());
+				if (res.code === 0) {
+					showToast('代归还成功');
+					fetchBorrowRecords();
+				} else {
+					showToast(res.message || '归还失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			}
+		}
+		
+		async function toggleUserStatus(item) {
+			const newStatus = item.status === 'active' ? 'disabled' : 'active';
+			const action = newStatus === 'active' ? '启用' : '禁用';
+			if (!confirm(`确定${action}用户"${item.username}"吗？`)) return;
+			try {
+				const res = await fetch(`${API_BASE}/user/${item.id}`, {
+					method: 'PUT',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ status: newStatus })
+				}).then(r => r.json());
+				if (res.code === 0) {
+					showToast(`${action}成功`);
+					fetchData();
+				} else {
+					showToast(res.message || '操作失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			}
+		}
+		
+		async function openUserDetail(item) {
+			selectedUser.value = item;
+			showUserDetail.value = true;
+			userDetailLoading.value = true;
+			userDetail.value = null;
+			try {
+				const res = await fetch(`${API_BASE}/users/${item.id}`).then(r => r.json());
+				if (res.code === 0) {
+					userDetail.value = res.data;
+				} else {
+					showToast(res.message || '加载失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			} finally {
+				userDetailLoading.value = false;
+			}
+		}
+		
+		function closeUserDetail() {
+			showUserDetail.value = false;
+			selectedUser.value = null;
+			userDetail.value = null;
+		}
+		
+		function openCategoryModal(item = null) {
+			editingCategory.value = item;
+			if (item) {
+				categoryForm.value = { name: item.name, sort: item.sort, enabled: item.enabled };
+			} else {
+				categoryForm.value = { name: '', sort: 0, enabled: true };
+			}
+			showCategoryModal.value = true;
+		}
+		
+		function closeCategoryModal() {
+			showCategoryModal.value = false;
+			editingCategory.value = null;
+		}
+		
+		async function saveCategory() {
+			if (!categoryForm.value.name) {
+				showToast('请输入分类名称', 'error');
+				return;
+			}
+			try {
+				const url = editingCategory.value 
+					? `${API_BASE}/categories/${editingCategory.value._id}`
+					: `${API_BASE}/categories`;
+				const method = editingCategory.value ? 'PUT' : 'POST';
+				const res = await fetch(url, {
+					method,
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(categoryForm.value)
+				}).then(r => r.json());
+				
+				if (res.code === 0) {
+					showToast(editingCategory.value ? '更新成功' : '新增成功');
+					closeCategoryModal();
+					fetchData();
+				} else {
+					showToast(res.message || '操作失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			}
+		}
+		
+		async function deleteCategory(item) {
+			if (!confirm(`确定删除分类"${item.name}"吗？`)) return;
+			try {
+				const res = await fetch(`${API_BASE}/categories/${item._id}`, {
+					method: 'DELETE'
+				}).then(r => r.json());
+				if (res.code === 0) {
+					showToast('删除成功');
+					fetchData();
+				} else {
+					showToast(res.message || '删除失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			}
+		}
+		
+		function openProductModal(item = null) {
+			editingProduct.value = item;
+			productCoverError.value = false;
+			if (item) {
+				productForm.value = {
+					name: item.name,
+					description: item.description,
+					price: item.price,
+					image: item.image,
+					category_id: item.category_id || '',
+					rating: item.rating,
+					sort: item.sort || 0,
+					on_sale: item.on_sale
+				};
+			} else {
+				productForm.value = { name: '', description: '', price: 0, image: '', category_id: '', rating: 0, sort: 0, on_sale: true };
+			}
+			showProductModal.value = true;
+		}
+		
+		function closeProductModal() {
+			showProductModal.value = false;
+			editingProduct.value = null;
+		}
+
+		function onProductCoverError() {
+			productCoverError.value = true;
+		}
+
+		async function uploadProductCover(event) {
+			const input = event.target;
+			const file = input.files && input.files[0];
+			if (!file) return;
+			if (!file.type.startsWith('image/')) {
+				showToast('请选择图片文件', 'error');
+				input.value = '';
+				return;
+			}
+			if (file.size > 5 * 1024 * 1024) {
+				showToast('图片不能超过5MB', 'error');
+				input.value = '';
+				return;
+			}
+
+			uploadingImage.value = true;
+			try {
+				const image = await new Promise((resolve, reject) => {
+					const reader = new FileReader();
+					reader.onload = () => resolve(reader.result);
+					reader.onerror = () => reject(new Error('图片读取失败'));
+					reader.readAsDataURL(file);
+				});
+				const response = await fetch(`${API_BASE}/upload`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ image })
+				});
+				const res = await response.json();
+				if (!response.ok || res.code !== 0 || !res.data || !res.data.path) {
+					throw new Error(res.message || '上传失败');
+				}
+				productForm.value.image = res.data.path;
+				productCoverError.value = false;
+				showToast('封面上传成功');
+			} catch (err) {
+				showToast(err.message || '封面上传失败', 'error');
+			} finally {
+				uploadingImage.value = false;
+				input.value = '';
+			}
+		}
+		
+		async function saveProduct() {
+			if (!productForm.value.name) {
+				showToast('请输入图书名称', 'error');
+				return;
+			}
+			try {
+				const url = editingProduct.value 
+					? `${API_BASE}/products/${editingProduct.value._id}`
+					: `${API_BASE}/products`;
+				const method = editingProduct.value ? 'PUT' : 'POST';
+				const res = await fetch(url, {
+					method,
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(productForm.value)
+				}).then(r => r.json());
+				
+				if (res.code === 0) {
+					showToast(editingProduct.value ? '更新成功' : '新增成功');
+					closeProductModal();
+					fetchData();
+				} else {
+					showToast(res.message || '操作失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			}
+		}
+		
+		async function deleteProduct(item) {
+			if (!confirm(`确定删除图书"${item.name}"吗？`)) return;
+			try {
+				const res = await fetch(`${API_BASE}/products/${item._id}`, {
+					method: 'DELETE'
+				}).then(r => r.json());
+				if (res.code === 0) {
+					showToast('删除成功');
+					fetchData();
+				} else {
+					showToast(res.message || '删除失败', 'error');
+				}
+			} catch (err) {
+				showToast('请求失败', 'error');
+			}
+		}
+		
+		function previewImage(url) {
+			window.open(url, '_blank');
+		}
+		
+		onMounted(() => {
+			fetchData();
+		});
+		
+		return {
+			activeTab, categories, products, users,
+			categorySearch, productSearch, productCategoryFilter, userSearch, userStatusFilter,
+			borrowRecords, borrowSearch, borrowStatusFilter,
+			filteredCategories, filteredProducts, filteredUsers, filteredBorrowRecords,
+			selectedCatIds, selectedProdIds, selectedUserIds, selectedBorrowIds,
+			showCategoryModal, editingCategory, categoryForm,
+			showProductModal, editingProduct, productForm,
+			showUserDetail, selectedUser, userDetail, userDetailLoading,
+			uploadingImage, productCoverPreview,
+			toast,
+			toggleSelectAll, batchDelete,
+			getCategoryName, formatPrice, formatDate, parseDevice,
+			isOverdue, getBorrowBadgeClass, getBorrowStatusText,
+			fetchBorrowRecords, forceReturn,
+			openCategoryModal, closeCategoryModal, saveCategory, deleteCategory,
+			openProductModal, closeProductModal, saveProduct, deleteProduct,
+			toggleUserStatus, openUserDetail, closeUserDetail,
+			previewImage, uploadProductCover, onProductCoverError
+		};
+	}
+});
+
+app.mount('#app');
+</script>
+</body>
+</html>
