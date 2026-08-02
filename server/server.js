@@ -391,7 +391,7 @@ app.post('/api/admin-register', async (req, res) => {
 app.get('/api/user/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    const user = await queryOne(COLLECTIONS.USERS, { _id: String(id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
     }
@@ -569,7 +569,7 @@ app.post('/api/users', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    let user = await queryOne(COLLECTIONS.USERS, { _id: String(id) });
     if (!user) user = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
@@ -597,7 +597,13 @@ app.post('/api/categories', async (req, res) => {
     if (!name) {
       return res.status(400).json({ code: 400, message: '分类名称不能为空' });
     }
-    const newCategory = { name, sort, enabled };
+    const existing = await query(COLLECTIONS.CATEGORIES);
+    const maxId = existing.reduce((max, c) => {
+      const n = Number(c.id);
+      return !isNaN(n) && n > max ? n : max;
+    }, 0);
+    const newId = maxId + 1;
+    const newCategory = { id: newId, name, sort, enabled };
     const result = await create(COLLECTIONS.CATEGORIES, newCategory);
     res.json({ code: 0, data: { _id: result._id, ...newCategory } });
   } catch (err) {
@@ -608,7 +614,7 @@ app.post('/api/categories', async (req, res) => {
 app.put('/api/categories/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: id });
+    let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: String(id) });
     if (!cat) cat = await queryOne(COLLECTIONS.CATEGORIES, { id: Number(id) });
     if (!cat) return res.status(404).json({ code: 404, message: '分类不存在' });
     const { name, sort, enabled } = req.body;
@@ -628,7 +634,7 @@ app.put('/api/categories/:id', async (req, res) => {
 app.delete('/api/categories/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: id });
+    let cat = await queryOne(COLLECTIONS.CATEGORIES, { _id: String(id) });
     if (!cat) cat = await queryOne(COLLECTIONS.CATEGORIES, { id: Number(id) });
     if (!cat) return res.status(404).json({ code: 404, message: '分类不存在' });
     await remove(COLLECTIONS.CATEGORIES, cat._id);
@@ -643,7 +649,10 @@ app.get('/api/products', async (req, res) => {
     const { category_id, all } = req.query;
     let condition = {};
     if (category_id && category_id !== 'all') {
-      condition.category_id = parseInt(category_id);
+      const cid = parseInt(category_id);
+      if (!isNaN(cid)) {
+        condition.category_id = cid;
+      }
     }
     const books = await query(COLLECTIONS.BOOKS, condition);
     let products = books;
@@ -678,7 +687,7 @@ app.get('/api/products', async (req, res) => {
 app.get('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: String(id) });
     if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
@@ -737,16 +746,25 @@ app.post('/api/products', async (req, res) => {
 app.put('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: String(id) });
     if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
     }
-    const allowedFields = ['name', 'description', 'price', 'image', 'category_id', 'category_name', 'on_sale', 'rating', 'sort', 'author', 'code', 'year', 'stock'];
+    const allowedFields = ['name', 'description', 'price', 'image', 'category_name', 'on_sale', 'rating', 'sort', 'author', 'code', 'year', 'stock'];
     const updateData = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
-        updateData[field] = field === 'category_id' ? parseInt(req.body[field]) : req.body[field];
+        updateData[field] = req.body[field];
+      }
+    }
+    if (req.body.category_id !== undefined) {
+      const cid = req.body.category_id;
+      if (cid === '' || cid === null || cid === undefined) {
+        updateData.category_id = null;
+      } else {
+        const n = Number(cid);
+        updateData.category_id = isNaN(n) ? null : n;
       }
     }
     if (Object.keys(updateData).length > 0) {
@@ -762,7 +780,7 @@ app.put('/api/products/:id', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let product = await queryOne(COLLECTIONS.BOOKS, { _id: id });
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: String(id) });
     if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
     if (!product) return res.status(404).json({ code: 404, message: '商品不存在' });
     await remove(COLLECTIONS.BOOKS, product._id);
@@ -999,7 +1017,7 @@ app.get('/api/login-records', async (req, res) => {
     const { user_id, login_type } = req.query;
     let condition = {};
     if (user_id) {
-      condition.user_id = user_id;
+      condition.user_id = String(user_id);
     }
     if (login_type) {
       condition.login_type = login_type;

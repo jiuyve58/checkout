@@ -209,7 +209,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
         <div class="toolbar-actions">
           <select class="select-input" v-model="productFilterCategory" style="width:160px">
             <option value="">全部分类</option>
-            <option v-for="cat in categories" :key="cat._id" :value="cat.id">{{ cat.name }}</option>
+            <option v-for="cat in categories" :key="cat._id" :value="String(cat.id)">{{ cat.name }}</option>
           </select>
           <button class="btn btn-secondary btn-sm" @click="toggleAllProducts">
             {{ selectedProductIds.length === filteredProducts.length && filteredProducts.length > 0 ? '取消全选' : '全选' }}
@@ -375,8 +375,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
     <div class="form-group">
       <label>分类</label>
       <select class="select-input" v-model="productModal.data.category_id">
-        <option :value="''">请选择分类</option>
-        <option v-for="cat in categories" :key="cat._id" :value="cat.id">{{ cat.name }}</option>
+        <option value="">请选择分类</option>
+        <option v-for="cat in categories" :key="cat._id" :value="String(cat.id)">{{ cat.name }}</option>
       </select>
     </div>
     <div class="form-group">
@@ -519,7 +519,7 @@ const app = createApp({
     const categoryModal = reactive({ show: false, isEdit: false, data: { name: '' } });
     const productModal = reactive({ show: false, isEdit: false, data: { name: '', author: '', category_id: '', stock: 0 } });
     const borrowModal = reactive({ show: false, data: { user_name: '', product_id: '' } });
-    const userModal = reactive({ show: false, isEdit: false, data: { username: '', password: '', role: 'user', status: 1 } });
+    const userModal = reactive({ show: false, isEdit: false, data: { username: '', password: '', role: 'user', status: 'active' } });
 
     const pageTitle = computed(() => ({
       categories: '分类管理',
@@ -633,8 +633,15 @@ const app = createApp({
     };
 
     const getProductCount = (catId) => products.value.filter(p => String(p.category_id) === String(catId)).length;
-    const getCategoryName = (catId) => { const c = categories.value.find(c => String(c.id) === String(catId)); return c ? c.name : '-'; };
-    const getProductName = (prodId) => { const p = products.value.find(p => String(p.id) === String(prodId) || String(p._id) === String(prodId)); return p ? p.name : '-'; };
+    const getCategoryName = (catId) => {
+      if (catId === '' || catId === null || catId === undefined) return '-';
+      const c = categories.value.find(c => String(c.id) === String(catId) || String(c._id) === String(catId));
+      return c ? c.name : '-';
+    };
+    const getProductName = (prodId) => {
+      const p = products.value.find(p => String(p.id) === String(prodId) || String(p._id) === String(prodId));
+      return p ? p.name : '-';
+    };
     const formatDate = (d) => { if (!d) return '-'; return new Date(d).toLocaleString('zh-CN'); };
 
     const openCategoryModal = (cat = null) => {
