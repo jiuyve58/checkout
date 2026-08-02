@@ -1,9 +1,0 @@
-{
-  "name": "zxc-book-api",
-  "env": "node",
-  "buildCommand": "npm install",
-  "startCommand": "node server.js",
-  "envVars": {
-    "NODE_ENV": "production"
-  }
-}

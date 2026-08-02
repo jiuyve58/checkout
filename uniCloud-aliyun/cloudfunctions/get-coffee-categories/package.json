@@ -1,7 +1,0 @@
-{
-  "name": "get-coffee-categories",
-  "dependencies": {},
-  "extensions": {
-    "uni-cloud-jql": {}
-  }
-}
