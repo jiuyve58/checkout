@@ -550,7 +550,7 @@ const app = createApp({
       if (borrowSearch.value) {
         const s = borrowSearch.value.toLowerCase();
         list = list.filter(b => {
-          const p = products.value.find(p => p.id === b.product_id);
+          const p = products.value.find(p => String(p.id) === String(b.product_id) || String(p._id) === String(b.product_id));
           return (p && p.name.toLowerCase().includes(s)) || (b.user_name && b.user_name.toLowerCase().includes(s));
         });
       }
@@ -588,6 +588,7 @@ const app = createApp({
         localStorage.setItem('admin_token', data.token);
         localStorage.setItem('admin_user', JSON.stringify(data.user));
         showToast('登录成功', 'success');
+        setTimeout(() => { loadCategories(); loadProducts(); loadBorrows(); loadUsers(); }, 100);
       } catch (e) {
         loginError.value = e.message || '登录失败';
       } finally {
@@ -631,9 +632,9 @@ const app = createApp({
       } catch (e) { showToast('加载用户失败: ' + e.message, 'error'); }
     };
 
-    const getProductCount = (catId) => products.value.filter(p => p.category_id === catId).length;
-    const getCategoryName = (catId) => { const c = categories.value.find(c => c.id === catId); return c ? c.name : '-'; };
-    const getProductName = (prodId) => { const p = products.value.find(p => p.id === prodId); return p ? p.name : '-'; };
+    const getProductCount = (catId) => products.value.filter(p => String(p.category_id) === String(catId)).length;
+    const getCategoryName = (catId) => { const c = categories.value.find(c => String(c.id) === String(catId)); return c ? c.name : '-'; };
+    const getProductName = (prodId) => { const p = products.value.find(p => String(p.id) === String(prodId) || String(p._id) === String(prodId)); return p ? p.name : '-'; };
     const formatDate = (d) => { if (!d) return '-'; return new Date(d).toLocaleString('zh-CN'); };
 
     const openCategoryModal = (cat = null) => {

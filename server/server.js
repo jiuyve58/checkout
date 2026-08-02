@@ -79,16 +79,41 @@ function generateUserId() {
   return 'u_' + timestamp + '_' + random;
 }
 
+const TOKEN_SECRET = process.env.TOKEN_SECRET || 'book_system_secret_2026_zxc';
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password + '_salt_zxc_2026').digest('hex');
 }
 
-function generateToken(userId) {
-  return crypto.createHash('sha256').update(userId + '_' + Date.now() + '_' + Math.random()).digest('hex');
+function b64encode(buf) {
+  return Buffer.isBuffer(buf) ? buf.toString('base64') : Buffer.from(buf).toString('base64')
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
-
-// Token 存储（内存，重启失效）
-const validTokens = new Map(); // token -> userId
+function b64decode(str) {
+  str = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) str += '=';
+  return Buffer.from(str, 'base64').toString('utf8');
+}
+function generateToken(userId) {
+  const header = b64encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = b64encode(JSON.stringify({ sub: String(userId), iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS }));
+  const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(header + '.' + payload).digest('base64')
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return header + '.' + payload + '.' + sig;
+}
+function verifyToken(token) {
+  try {
+    const [header, payload, sig] = token.split('.');
+    if (!header || !payload || !sig) return null;
+    const expSig = crypto.createHmac('sha256', TOKEN_SECRET).update(header + '.' + payload).digest('base64')
+      .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    if (expSig !== sig) return null;
+    const data = JSON.parse(b64decode(payload));
+    if (data.exp && data.exp < Date.now()) return null;
+    return data.sub;
+  } catch { return null; }
+}
 
 function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -96,7 +121,7 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ code: 401, message: '未登录或登录已过期' });
   }
   const token = authHeader.substring(7);
-  const userId = validTokens.get(token);
+  const userId = verifyToken(token);
   if (!userId) {
     return res.status(401).json({ code: 401, message: '未登录或登录已过期' });
   }
@@ -104,13 +129,8 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-function invalidateToken(token) {
-  validTokens.delete(token);
-}
-
-function storeToken(token, userId) {
-  validTokens.set(token, userId);
-}
+function invalidateToken() {}
+function storeToken() {}
 
 function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
