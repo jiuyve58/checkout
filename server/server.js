@@ -48,39 +48,23 @@ app.get('/api/test-db', async (req, res) => {
     if (!cloudAvailable()) {
       return res.status(503).json({ code: 503, message: '云数据库未连接' });
     }
-    const cloudbase = require('@cloudbase/node-sdk');
-    const envId = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
-    const app = cloudbase.init({ envId });
-    const db = app.database();
-    const _ = db.command;
-
     const results = {};
     for (const colName of ['users', 'books', 'categories']) {
       try {
-        const col = db.collection(colName);
         const t0 = Date.now();
-        const snapshot = await Promise.race([
-          col.limit(1).get(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
-        ]);
-        results[colName] = { count: snapshot.data.length, time: Date.now() - t0 + 'ms' };
+        const items = await query(colName);
+        results[colName] = { count: items.length, time: Date.now() - t0 + 'ms' };
       } catch (e) {
         results[colName] = { error: e.message };
       }
     }
-
     try {
       const t0 = Date.now();
-      const col = db.collection('users');
-      const snapshot = await Promise.race([
-        col.where({ username: 'admin' }).limit(1).get(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
-      ]);
-      results['users_where_admin'] = { count: snapshot.data.length, time: Date.now() - t0 + 'ms' };
+      const u = await queryOne('users', { username: 'admin' });
+      results['users_where_admin'] = { found: !!u, time: Date.now() - t0 + 'ms' };
     } catch (e) {
       results['users_where_admin'] = { error: e.message };
     }
-
     res.json({ code: 0, data: results });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });

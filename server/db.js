@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+const https = require('https');
 const seedData = require('./seed-data');
 
 const COLLECTIONS = {
@@ -8,7 +10,11 @@ const COLLECTIONS = {
   LOGIN_RECORDS: 'login_records'
 };
 
-let cloudDb = null;
+const TCB_ENV = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
+const TCB_SECRETID = process.env.TENCENTCLOUD_SECRETID || '';
+const TCB_SECRETKEY = process.env.TENCENTCLOUD_SECRETKEY || '';
+const TCB_API_HOST = 'tcb-api.tencentcloudapi.com';
+
 let cloudReady = false;
 
 const collectionMap = {
@@ -19,76 +25,95 @@ const collectionMap = {
   loginRecords: COLLECTIONS.LOGIN_RECORDS
 };
 
-function initCloud() {
-  if (cloudReady) return Promise.resolve(true);
-  const timeoutMs = Number(process.env.TCB_INIT_TIMEOUT) || 2500;
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      if (!cloudReady) {
-        console.error(`[数据库] 云数据库初始化超时(${timeoutMs}ms)`);
-        resolve(false);
-      }
-    }, timeoutMs);
-    (async () => {
-      try {
-        console.log('[数据库] 正在初始化云数据库...');
-        console.log('[数据库] TCB_ENV:', process.env.TCB_ENV || '(未设置,使用默认)');
-        console.log('[数据库] SECRETID:', process.env.TENCENTCLOUD_SECRETID ? '已设置' : '未设置');
-        console.log('[数据库] SECRETKEY:', process.env.TENCENTCLOUD_SECRETKEY ? '已设置' : '未设置');
-
-        const cloudbase = require('@cloudbase/node-sdk');
-        const envId = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
-
-        const initOptions = { envId };
-        if (process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY) {
-          initOptions.credentials = {
-            secretId: process.env.TENCENTCLOUD_SECRETID,
-            secretKey: process.env.TENCENTCLOUD_SECRETKEY
-          };
-        }
-
-        console.log('[数据库] 正在调用 cloudbase.init...');
-        const app = cloudbase.init(initOptions);
-        console.log('[数据库] init 成功,正在获取 database...');
-        cloudDb = app.database();
-        if (typeof cloudDb.collection === 'function') {
-          try {
-            const testCol = getCloudCollection('users');
-            await Promise.race([
-              testCol.limit(1).get().then(() => true).catch(() => false),
-              new Promise((_, rej) => setTimeout(() => rej(new Error('ping-timeout')), Math.max(800, timeoutMs - 500)))
-            ]);
-          } catch (_) {}
-        }
-        clearTimeout(timer);
-        cloudReady = true;
-        console.log('[数据库] 云数据库连接成功');
-        resolve(true);
-      } catch (err) {
-        clearTimeout(timer);
-        console.error('[数据库] 云数据库初始化失败:', err.message);
-        cloudReady = false;
-        resolve(false);
-      }
-    })();
-  });
-}
-
 function cloudAvailable() {
-  return cloudReady && cloudDb !== null;
+  return cloudReady;
 }
 
 function getCloudCollection(name) {
-  const collectionName = collectionMap[name] || name;
-  return cloudDb.collection(collectionName);
+  return collectionMap[name] || name;
 }
 
-const CLOUD_OP_TIMEOUT = Number(process.env.TCB_OP_TIMEOUT) || 5000;
-function wrapCloud(promise, opName) {
-  return Promise.race([
-    promise,
-    new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout:${opName}`)), CLOUD_OP_TIMEOUT))
-  ]);
+function signRequest(action, params, secretId, secretKey) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const date = new Date().toISOString().substr(0, 10);
+  const service = 'tcb';
+  const algorithm = 'TC3-HMAC-SHA256';
+  const httpMethod = 'POST';
+  const canonicalUri = '/';
+  const canonicalQueryString = '';
+  const payload = JSON.stringify(params);
+  const payloadHash = crypto.createHash('sha256').update(payload).digest('hex');
+
+  const canonicalHeaders = `content-type:application/json\nhost:${TCB_API_HOST}\nx-tc-action:${action.toLowerCase()}\n`;
+  const signedHeaders = 'content-type;host;x-tc-action';
+  const canonicalRequest = `${httpMethod}\n${canonicalUri}\n${canonicalQueryString}\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+
+  const credentialScope = `${date}/${service}/tc3_request`;
+  const stringToSign = `${algorithm}\n${timestamp}\n${credentialScope}\n${crypto.createHash('sha256').update(canonicalRequest).digest('hex')}`;
+
+  const secretDate = crypto.createHmac('sha256', `TC3${secretKey}`).update(date).digest();
+  const secretService = crypto.createHmac('sha256', secretDate).update(service).digest();
+  const secretSigning = crypto.createHmac('sha256', secretService).update('tc3_request').digest();
+  const signature = crypto.createHmac('sha256', secretSigning).update(stringToSign).digest('hex');
+
+  return {
+    'Authorization': `${algorithm} Credential=${secretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+    'Content-Type': 'application/json',
+    'Host': TCB_API_HOST,
+    'X-TC-Action': action,
+    'X-TC-Version': '2018-06-08',
+    'X-TC-Timestamp': timestamp
+  };
+}
+
+function tcbApiCall(action, params) {
+  return new Promise((resolve, reject) => {
+    const headers = signRequest(action, params, TCB_SECRETID, TCB_SECRETKEY);
+    const postData = JSON.stringify(params);
+    const req = https.request({
+      hostname: TCB_API_HOST,
+      method: 'POST',
+      headers: { ...headers, 'Content-Length': Buffer.byteLength(postData) },
+      timeout: 8000
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.Response && json.Response.Error) {
+            reject(new Error(`${json.Response.Error.Code}: ${json.Response.Error.Message}`));
+          } else {
+            resolve(json.Response);
+          }
+        } catch (e) {
+          reject(new Error(`Invalid JSON: ${data.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error('HTTP timeout')); });
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+async function initCloud() {
+  if (cloudReady) return true;
+  if (!TCB_SECRETID || !TCB_SECRETKEY) {
+    console.error('[数据库] 缺少 TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY 环境变量');
+    return false;
+  }
+  try {
+    console.log('[数据库] 测试 CloudBase API 连接...');
+    const resp = await tcbApiCall('DescribeEnvs', {});
+    console.log('[数据库] CloudBase API 连接成功,返回 envs:', resp.EnvList ? resp.EnvList.length : 0);
+    cloudReady = true;
+    return true;
+  } catch (err) {
+    console.error('[数据库] CloudBase API 连接失败:', err.message);
+    return false;
+  }
 }
 
 function normalizeItem(item) {
@@ -104,51 +129,77 @@ function normalizeItem(item) {
 
 async function query(name, condition = {}) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
-  let col = getCloudCollection(name);
-  let res;
+  const colName = getCloudCollection(name);
+  const params = {
+    EnvId: TCB_ENV,
+    CollectionName: colName,
+    Limit: 1000,
+    Offset: 0
+  };
   if (Object.keys(condition).length > 0) {
-    res = await wrapCloud(col.where(condition).limit(100).get(), `query(${name} where)`);
-  } else {
-    res = await wrapCloud(col.limit(1000).get(), `query(${name} all)`);
+    params.Query = JSON.stringify(condition);
   }
-  return res.data.map(normalizeItem);
+  const resp = await tcbApiCall('DatabaseQuery', params);
+  const items = (resp.Items || resp.Data || []).map(normalizeItem);
+  return items;
 }
 
 async function queryOne(name, condition = {}) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
-  let col = getCloudCollection(name);
-  let res;
+  const colName = getCloudCollection(name);
+  const params = {
+    EnvId: TCB_ENV,
+    CollectionName: colName,
+    Limit: 1,
+    Offset: 0
+  };
   if (Object.keys(condition).length > 0) {
-    res = await wrapCloud(col.where(condition).limit(1).get(), `queryOne(${name} where)`);
-  } else {
-    res = await wrapCloud(col.limit(1).get(), `queryOne(${name} all)`);
+    params.Query = JSON.stringify(condition);
   }
-  const items = res.data.map(normalizeItem);
+  const resp = await tcbApiCall('DatabaseQuery', params);
+  const items = (resp.Items || resp.Data || []).map(normalizeItem);
   return items.length > 0 ? items[0] : null;
 }
 
 async function create(name, data) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
-  const col = getCloudCollection(name);
+  const colName = getCloudCollection(name);
   const doc = { ...data };
   delete doc._id;
-  const res = await wrapCloud(col.add(doc), `create(${name})`);
-  return { _id: res.id, ...data };
+  const params = {
+    EnvId: TCB_ENV,
+    CollectionName: colName,
+    Data: JSON.stringify(doc)
+  };
+  const resp = await tcbApiCall('DatabaseInsert', params);
+  const id = resp.Id || (resp.Inserted ? String(resp.Inserted) : null);
+  return { _id: id, ...data };
 }
 
 async function update(name, docId, data) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
-  const col = getCloudCollection(name);
+  const colName = getCloudCollection(name);
   const updateData = { ...data };
   delete updateData._id;
-  await wrapCloud(col.doc(String(docId)).update(updateData), `update(${name})`);
+  const params = {
+    EnvId: TCB_ENV,
+    CollectionName: colName,
+    DocId: String(docId),
+    Data: JSON.stringify(updateData)
+  };
+  await tcbApiCall('DatabaseUpdate', params);
   return { _id: docId, ...data };
 }
 
 async function remove(name, docId) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
-  const col = getCloudCollection(name);
-  await wrapCloud(col.doc(String(docId)).remove(), `remove(${name})`);
+  const colName = getCloudCollection(name);
+  const params = {
+    EnvId: TCB_ENV,
+    CollectionName: colName,
+    DocId: String(docId)
+  };
+  await tcbApiCall('DatabaseDelete', params);
   return { success: true };
 }
 
@@ -207,7 +258,7 @@ async function importDataFromJson(data) {
   return results;
 }
 
-const dbInitPromise = Promise.resolve().then(() => initCloud());
+const dbInitPromise = initCloud();
 function waitForDb(timeoutMs = 2000) {
   if (cloudReady) return Promise.resolve(true);
   return Promise.race([
