@@ -187,14 +187,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
           </tr>
         </thead>
         <tbody>
-          <tr v-for="cat in filteredCategories" :key="cat.id">
-            <td class="checkbox-cell"><input type="checkbox" :value="cat.id" v-model="selectedCategoryIds"></td>
+          <tr v-for="cat in filteredCategories" :key="cat._id">
+            <td class="checkbox-cell"><input type="checkbox" :value="cat._id" v-model="selectedCategoryIds"></td>
             <td>{{ cat.id }}</td>
             <td>{{ cat.name }}</td>
             <td>{{ getProductCount(cat.id) }}</td>
             <td class="actions">
               <button class="btn btn-secondary btn-sm" @click="openCategoryModal(cat)">编辑</button>
-              <button class="btn btn-danger btn-sm" @click="deleteCategory(cat.id)">删除</button>
+              <button class="btn btn-danger btn-sm" @click="deleteCategory(cat._id)">删除</button>
             </td>
           </tr>
           <tr v-if="filteredCategories.length === 0" class="empty-row"><td colspan="5">暂无分类数据</td></tr>
@@ -233,8 +233,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
           </tr>
         </thead>
         <tbody>
-          <tr v-for="prod in filteredProducts" :key="prod.id">
-            <td class="checkbox-cell"><input type="checkbox" :value="prod.id" v-model="selectedProductIds"></td>
+          <tr v-for="prod in filteredProducts" :key="prod._id">
+            <td class="checkbox-cell"><input type="checkbox" :value="prod._id" v-model="selectedProductIds"></td>
             <td>{{ prod.id }}</td>
             <td>{{ prod.name }}</td>
             <td>{{ prod.author }}</td>
@@ -246,7 +246,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
             </td>
             <td class="actions">
               <button class="btn btn-secondary btn-sm" @click="openProductModal(prod)">编辑</button>
-              <button class="btn btn-danger btn-sm" @click="deleteProduct(prod.id)">删除</button>
+              <button class="btn btn-danger btn-sm" @click="deleteProduct(prod._id)">删除</button>
             </td>
           </tr>
           <tr v-if="filteredProducts.length === 0" class="empty-row"><td colspan="7">暂无书籍数据</td></tr>
@@ -326,8 +326,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
           </tr>
         </thead>
         <tbody>
-          <tr v-for="user in filteredUsers" :key="user.id">
-            <td class="checkbox-cell"><input type="checkbox" :value="user.id" v-model="selectedUserIds"></td>
+          <tr v-for="user in filteredUsers" :key="user._id">
+            <td class="checkbox-cell"><input type="checkbox" :value="user._id" v-model="selectedUserIds"></td>
             <td>{{ user.id }}</td>
             <td>{{ user.username }}</td>
             <td><span :class="['badge', user.role === 'admin' ? 'badge-warning' : 'badge-info']">{{ user.role === 'admin' ? '管理员' : '普通用户' }}</span></td>
@@ -335,7 +335,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
             <td>{{ formatDate(user.created_at) }}</td>
             <td class="actions">
               <button class="btn btn-secondary btn-sm" @click="openUserModal(user)">编辑</button>
-              <button class="btn btn-danger btn-sm" @click="deleteUser(user.id)">删除</button>
+              <button class="btn btn-danger btn-sm" @click="deleteUser(user._id)">删除</button>
             </td>
           </tr>
           <tr v-if="filteredUsers.length === 0" class="empty-row"><td colspan="7">暂无用户数据</td></tr>
@@ -616,7 +616,7 @@ const app = createApp({
 
     const loadProducts = async () => {
       try {
-        products.value = await apiFetch('/products');
+        products.value = await apiFetch('/products?all=true');
       } catch (e) { showToast('加载书籍失败: ' + e.message, 'error'); }
     };
 
@@ -647,7 +647,7 @@ const app = createApp({
       if (!categoryModal.data.name) { showToast('请输入分类名称', 'error'); return; }
       try {
         if (categoryModal.isEdit) {
-          await apiFetch('/categories/' + categoryModal.data.id, {
+          await apiFetch('/categories/' + categoryModal.data._id, {
             method: 'PUT', body: JSON.stringify(categoryModal.data)
           });
           showToast('更新成功', 'success');
@@ -675,7 +675,7 @@ const app = createApp({
       if (selectedCategoryIds.value.length === filteredCategories.value.length) {
         selectedCategoryIds.value = [];
       } else {
-        selectedCategoryIds.value = filteredCategories.value.map(c => c.id);
+        selectedCategoryIds.value = filteredCategories.value.map(c => c._id);
       }
     };
 
@@ -702,7 +702,7 @@ const app = createApp({
       if (!productModal.data.name) { showToast('请输入书名', 'error'); return; }
       try {
         if (productModal.isEdit) {
-          await apiFetch('/products/' + productModal.data.id, {
+          await apiFetch('/products/' + productModal.data._id, {
             method: 'PUT', body: JSON.stringify(productModal.data)
           });
           showToast('更新成功', 'success');
@@ -730,7 +730,7 @@ const app = createApp({
       if (selectedProductIds.value.length === filteredProducts.value.length) {
         selectedProductIds.value = [];
       } else {
-        selectedProductIds.value = filteredProducts.value.map(p => p.id);
+        selectedProductIds.value = filteredProducts.value.map(p => p._id);
       }
     };
 
@@ -793,7 +793,7 @@ const app = createApp({
       if (!userModal.isEdit && !userModal.data.password) { showToast('请输入密码', 'error'); return; }
       try {
         if (userModal.isEdit) {
-          await apiFetch('/users/' + userModal.data.id, {
+          await apiFetch('/users/' + userModal.data._id, {
             method: 'PUT', body: JSON.stringify(userModal.data)
           });
           showToast('更新成功', 'success');
@@ -821,7 +821,7 @@ const app = createApp({
       if (selectedUserIds.value.length === filteredUsers.value.length) {
         selectedUserIds.value = [];
       } else {
-        selectedUserIds.value = filteredUsers.value.map(u => u.id);
+        selectedUserIds.value = filteredUsers.value.map(u => u._id);
       }
     };
 

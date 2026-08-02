@@ -558,30 +558,34 @@ app.delete('/api/categories/:id', async (req, res) => {
 
 app.get('/api/products', async (req, res) => {
   try {
-    const { category_id } = req.query;
+    const { category_id, all } = req.query;
     let condition = {};
     if (category_id && category_id !== 'all') {
       condition.category_id = parseInt(category_id);
     }
     const books = await query(COLLECTIONS.BOOKS, condition);
-    const products = books
-      .filter(b => b.on_sale)
-      .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (a.sort || 0) - (b.sort || 0))
-      .slice(0, 20)
-      .map(b => ({
-        _id: b._id,
-        name: b.name,
-        description: b.description || '',
-        price: b.price,
-        image: b.image,
-        category_id: b.category_id ? String(b.category_id) : null,
-        on_sale: b.on_sale,
-        rating: b.rating || 0,
-        author: b.author || '',
-        code: b.code || '',
-        year: b.year || null,
-        stock: b.stock !== undefined ? b.stock : 5
-      }));
+    let products = books;
+    if (!all) {
+      products = books
+        .filter(b => b.on_sale)
+        .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (a.sort || 0) - (b.sort || 0))
+        .slice(0, 20);
+    }
+    products = products.map(b => ({
+      _id: b._id,
+      id: b.id,
+      name: b.name,
+      description: b.description || '',
+      price: b.price,
+      image: b.image,
+      category_id: b.category_id ? String(b.category_id) : null,
+      on_sale: b.on_sale,
+      rating: b.rating || 0,
+      author: b.author || '',
+      code: b.code || '',
+      year: b.year || null,
+      stock: b.stock !== undefined ? b.stock : 5
+    }));
     res.json({ code: 0, data: products });
   } catch (err) {
     console.error('获取图书列表失败:', err);
