@@ -280,7 +280,7 @@ app.use((req, res, next) => {
   authMiddleware(req, res, next);
 });
 
-app.post('/api/fix-admin', async (req, res) => {
+app.get('/api/fix-admin', async (req, res) => {
   try {
     const adminUser = await queryOne(COLLECTIONS.USERS, { username: 'admin' });
     const newPwdHash = hashPassword('admin123');
