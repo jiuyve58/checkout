@@ -49,6 +49,31 @@ function generateToken(userId) {
   return crypto.createHash('sha256').update(userId + '_' + Date.now() + '_' + Math.random()).digest('hex');
 }
 
+// Token 存储（内存，重启失效）
+const validTokens = new Map(); // token -> userId
+
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ code: 401, message: '未登录或登录已过期' });
+  }
+  const token = authHeader.substring(7);
+  const userId = validTokens.get(token);
+  if (!userId) {
+    return res.status(401).json({ code: 401, message: '未登录或登录已过期' });
+  }
+  req.userId = userId;
+  next();
+}
+
+function invalidateToken(token) {
+  validTokens.delete(token);
+}
+
+function storeToken(token, userId) {
+  validTokens.set(token, userId);
+}
+
 function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
@@ -152,6 +177,7 @@ app.post('/api/login', async (req, res) => {
       return res.status(403).json({ code: 403, message: '账号已被禁用' });
     }
     const token = generateToken(user._id);
+    storeToken(token, user._id);
     await update(COLLECTIONS.USERS, user._id, { last_login_at: new Date().toISOString() });
     await recordLogin(user, req, 'login');
     res.json({
@@ -165,6 +191,55 @@ app.post('/api/login', async (req, res) => {
     console.error('登录失败:', err);
     res.status(500).json({ code: 500, message: err.message });
   }
+});
+
+app.post('/api/admin-login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ code: 400, message: '用户名和密码不能为空' });
+    }
+    const user = await queryOne(COLLECTIONS.USERS, { username });
+    if (!user) {
+      return res.status(404).json({ code: 404, message: '用户不存在' });
+    }
+    if (user.password !== hashPassword(password)) {
+      return res.status(401).json({ code: 401, message: '密码错误' });
+    }
+    if (user.status !== 'active') {
+      return res.status(403).json({ code: 403, message: '账号已被禁用' });
+    }
+    if (user.role !== 'admin') {
+      return res.status(403).json({ code: 403, message: '该账号无管理权限' });
+    }
+    const token = generateToken(user._id);
+    storeToken(token, user._id);
+    await update(COLLECTIONS.USERS, user._id, { last_login_at: new Date().toISOString() });
+    await recordLogin(user, req, 'admin_login');
+    res.json({
+      code: 0,
+      data: {
+        token,
+        user: sanitizeUser(user)
+      }
+    });
+  } catch (err) {
+    console.error('管理员登录失败:', err);
+    res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
+app.post('/api/logout', authMiddleware, (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader ? authHeader.substring(7) : null;
+  if (token) invalidateToken(token);
+  res.json({ code: 0, message: '退出成功' });
+});
+
+const PUBLIC_PATHS = ['/health', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-local', '/api/import-from-json', '/'];
+app.use((req, res, next) => {
+  if (PUBLIC_PATHS.includes(req.path) || !req.path.startsWith('/api/')) return next();
+  authMiddleware(req, res, next);
 });
 
 app.post('/api/admin-register', async (req, res) => {
