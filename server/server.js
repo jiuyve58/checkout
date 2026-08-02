@@ -274,10 +274,47 @@ app.post('/api/logout', authMiddleware, (req, res) => {
   res.json({ code: 0, message: '退出成功' });
 });
 
-const PUBLIC_PATHS = ['/health', '/api/test-db', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-json', '/api/reset-seed', '/'];
+const PUBLIC_PATHS = ['/health', '/api/test-db', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/fix-admin', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-json', '/api/reset-seed', '/'];
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.includes(req.path) || !req.path.startsWith('/api/')) return next();
   authMiddleware(req, res, next);
+});
+
+app.post('/api/fix-admin', async (req, res) => {
+  try {
+    const adminUser = await queryOne(COLLECTIONS.USERS, { username: 'admin' });
+    const newPwdHash = hashPassword('admin123');
+    if (!adminUser) {
+      const adminId = generateUserId();
+      await create(COLLECTIONS.USERS, {
+        _id: adminId,
+        username: 'admin',
+        password: newPwdHash,
+        nickname: '系统管理员',
+        avatar: '',
+        email: '',
+        phone: '',
+        member_level: 'vip',
+        role: 'admin',
+        status: 'active',
+        created_at: new Date().toISOString()
+      });
+      return res.json({ code: 0, message: 'admin 账号已创建,密码: admin123' });
+    }
+    await update(COLLECTIONS.USERS, adminUser._id, {
+      password: newPwdHash,
+      role: 'admin',
+      status: 'active'
+    });
+    res.json({
+      code: 0,
+      message: 'admin 密码已重置为 admin123',
+      data: { _id: adminUser._id, old_password_prefix: adminUser.password ? adminUser.password.slice(0, 8) : '(空)', new_password_prefix: newPwdHash.slice(0, 8) }
+    });
+  } catch (err) {
+    console.error('修复 admin 失败:', err);
+    res.status(500).json({ code: 500, message: err.message });
+  }
 });
 
 app.post('/api/admin-register', async (req, res) => {
