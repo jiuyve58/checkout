@@ -1,0 +1,105 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index"
+    },
+    {
+      "path": "pages/login/login",
+      "style": {
+        "topWindow": false,
+        "leftWindow": false,
+        "navigationBarTitleText": "登录"
+      }
+    },
+    {
+      "path": "pages/error/404",
+      "style": {
+        "navigationBarTitleText": "Not Found"
+      }
+    },
+    {
+      "path": "pages/book-categories/list",
+      "style": {
+        "navigationBarTitleText": "分类列表"
+      }
+    },
+    {
+      "path": "pages/book-categories/add",
+      "style": {
+        "navigationBarTitleText": "新增分类"
+      }
+    },
+    {
+      "path": "pages/book-categories/edit",
+      "style": {
+        "navigationBarTitleText": "编辑分类"
+      }
+    },
+    {
+      "path": "pages/book-products/list",
+      "style": {
+        "navigationBarTitleText": "图书列表"
+      }
+    },
+    {
+      "path": "pages/book-products/add",
+      "style": {
+        "navigationBarTitleText": "新增图书"
+      }
+    },
+    {
+      "path": "pages/book-products/edit",
+      "style": {
+        "navigationBarTitleText": "编辑图书"
+      }
+    },
+    {
+      "path": "pages/users/list",
+      "style": {
+        "navigationBarTitleText": "用户管理"
+      }
+    },
+    {
+      "path": "pages/users/detail",
+      "style": {
+        "navigationBarTitleText": "用户详情"
+      }
+    },
+    {
+      "path": "pages/borrow-records/list",
+      "style": {
+        "navigationBarTitleText": "借阅记录"
+      }
+    },
+    {
+      "path": "pages/login-records/list",
+      "style": {
+        "navigationBarTitleText": "登录记录"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "图书管理后台",
+    "navigationBarBackgroundColor": "#F8F8F8",
+    "backgroundColor": "#F8F8F8",
+    "h5": {
+      "titleNView": false
+    }
+  },
+  "topWindow": {
+    "path": "windows/topWindow",
+    "style": {
+      "height": "60px"
+    },
+    "matchMedia": {
+      "minWidth": 0
+    }
+  },
+  "leftWindow": {
+    "path": "windows/leftWindow",
+    "style": {
+      "width": "240px"
+    }
+  }
+}

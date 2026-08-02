@@ -33,3 +33,16 @@ db.json.local
 
 # Admin build output (will be placed in server/admin/)
 admin-unpackage/
+
+# Temporary scripts
+copy-admin.bat
+copy-admin.js
+
+# Binary system files (accidentally copied)
+admin/windows/**/*.exe
+admin/windows/**/*.dll
+admin/windows/**/*.bat
+admin/windows/**/*.prx
+admin/windows/**/*.xml
+admin/windows/**/*.bin
+admin/windows/**/*.ini
