@@ -244,7 +244,7 @@ app.post('/api/logout', authMiddleware, (req, res) => {
   res.json({ code: 0, message: '退出成功' });
 });
 
-const PUBLIC_PATHS = ['/health', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-local', '/api/import-from-json', '/'];
+const PUBLIC_PATHS = ['/health', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-local', '/api/import-from-json', '/api/reset-seed', '/'];
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.includes(req.path) || !req.path.startsWith('/api/')) return next();
   authMiddleware(req, res, next);
@@ -904,6 +904,42 @@ app.post('/api/import-from-local', async (req, res) => {
     const results = await importDataFromLocal();
     res.json({ code: 0, data: results, message: '导入完成' });
   } catch (err) {
+    res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
+app.get('/api/reset-seed', async (req, res) => {
+  try {
+    const localData = JSON.parse(fs.readFileSync(path.join(__dirname, 'db.json'), 'utf-8'));
+    const results = {};
+    const targetCollections = ['categories', 'products', 'borrowRecords'];
+    for (const key of targetCollections) {
+      const items = localData[key] || [];
+      if (cloudAvailable()) {
+        try {
+          const existing = await query(key);
+          for (const item of existing) {
+            if (item._id) await remove(key, item._id);
+          }
+          let imported = 0;
+          for (const item of items) {
+            await create(key, item);
+            imported++;
+          }
+          results[key] = { imported };
+        } catch (err) {
+          results[key] = { error: err.message };
+        }
+      } else {
+        results[key] = { imported: items.length };
+      }
+    }
+    if (!cloudAvailable()) {
+      fs.writeFileSync(path.join(__dirname, 'db.json'), JSON.stringify(localData, null, 2), 'utf-8');
+    }
+    res.json({ code: 0, data: results, message: '数据已重置' });
+  } catch (err) {
+    console.error('重置数据失败:', err);
     res.status(500).json({ code: 500, message: err.message });
   }
 });
