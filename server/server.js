@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
 const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromJson, seedDataFromLocal, waitForDb, initCloud, getLastInitError } = require('./db');
 const seedData = require('./seed-data');
 
@@ -143,7 +145,10 @@ function getClientIp(req) {
 }
 
 function sanitizeUser(user) {
+  const status = user.status;
+  const normalizedStatus = status === 1 || status === '1' || status === true ? 'active' : (status === 0 || status === '0' || status === false ? 'disabled' : (status || 'active'));
   return {
+    _id: user._id,
     id: user._id || user.id,
     username: user.username,
     nickname: user.nickname || user.username,
@@ -152,7 +157,7 @@ function sanitizeUser(user) {
     phone: user.phone || '',
     member_level: user.member_level || 'normal',
     role: user.role || 'user',
-    status: user.status || 'active',
+    status: normalizedStatus,
     created_at: user.created_at
   };
 }
@@ -294,7 +299,7 @@ app.post('/api/logout', authMiddleware, (req, res) => {
   res.json({ code: 0, message: '退出成功' });
 });
 
-const PUBLIC_PATHS = ['/health', '/api/test-db', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/fix-admin', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-json', '/api/reset-seed', '/'];
+const PUBLIC_PATHS = ['/health', '/api/test-db', '/api/register', '/api/login', '/api/admin-login', '/api/menus', '/api/login-records', '/'];
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.includes(req.path) || !req.path.startsWith('/api/')) return next();
   authMiddleware(req, res, next);
@@ -399,18 +404,58 @@ app.get('/api/user/:id', async (req, res) => {
 app.put('/api/user/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    let user = await queryOne(COLLECTIONS.USERS, { _id: String(id) });
     if (!user) user = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
     }
-    const { nickname, avatar, email, phone, status } = req.body;
+    const { nickname, avatar, email, phone, status, role, password } = req.body;
     const updateData = {};
     if (nickname !== undefined) updateData.nickname = nickname;
     if (avatar !== undefined) updateData.avatar = avatar;
     if (email !== undefined) updateData.email = email;
     if (phone !== undefined) updateData.phone = phone;
-    if (status !== undefined) updateData.status = status;
+    if (role !== undefined) updateData.role = role;
+    if (status !== undefined) {
+      updateData.status = (status === 1 || status === '1' || status === true || status === 'active') ? 'active' :
+                          (status === 0 || status === '0' || status === false || status === 'disabled') ? 'disabled' : status;
+    }
+    if (password !== undefined && password) {
+      updateData.password = hashPassword(password);
+    }
+    if (Object.keys(updateData).length > 0) {
+      await update(COLLECTIONS.USERS, user._id, updateData);
+    }
+    const updatedUser = await queryOne(COLLECTIONS.USERS, { _id: user._id });
+    res.json({ code: 0, data: sanitizeUser(updatedUser) });
+  } catch (err) {
+    console.error('更新用户失败:', err);
+    res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    let user = await queryOne(COLLECTIONS.USERS, { _id: String(id) });
+    if (!user) user = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
+    if (!user) {
+      return res.status(404).json({ code: 404, message: '用户不存在' });
+    }
+    const { nickname, avatar, email, phone, status, role, password } = req.body;
+    const updateData = {};
+    if (nickname !== undefined) updateData.nickname = nickname;
+    if (avatar !== undefined) updateData.avatar = avatar;
+    if (email !== undefined) updateData.email = email;
+    if (phone !== undefined) updateData.phone = phone;
+    if (role !== undefined) updateData.role = role;
+    if (status !== undefined) {
+      updateData.status = (status === 1 || status === '1' || status === true || status === 'active') ? 'active' :
+                          (status === 0 || status === '0' || status === false || status === 'disabled') ? 'disabled' : status;
+    }
+    if (password !== undefined && password) {
+      updateData.password = hashPassword(password);
+    }
     if (Object.keys(updateData).length > 0) {
       await update(COLLECTIONS.USERS, user._id, updateData);
     }
@@ -433,9 +478,9 @@ app.get('/api/users', async (req, res) => {
     const borrowRecords = await query(COLLECTIONS.BORROW_RECORDS);
     const loginRecords = await query(COLLECTIONS.LOGIN_RECORDS);
     let result = users.map(u => {
-      const userId = u._id;
-      const borrowCount = borrowRecords.filter(b => b.user_id === userId && b.status === 'borrowed').length;
-      const loginCount = loginRecords.filter(l => l.user_id === userId).length;
+      const userIdStr = String(u._id);
+      const borrowCount = borrowRecords.filter(b => String(b.user_id) === userIdStr && b.status === 'borrowed').length;
+      const loginCount = loginRecords.filter(l => String(l.user_id) === userIdStr).length;
       return {
         ...sanitizeUser(u),
         borrow_count: borrowCount,
@@ -444,7 +489,7 @@ app.get('/api/users', async (req, res) => {
     });
     if (keyword) {
       const kw = String(keyword).toLowerCase();
-      result = result.filter(u => 
+      result = result.filter(u =>
         (u.username && u.username.toLowerCase().includes(kw)) ||
         (u.nickname && u.nickname.toLowerCase().includes(kw))
       );
@@ -460,12 +505,13 @@ app.get('/api/users', async (req, res) => {
 app.get('/api/users/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    const user = await queryOne(COLLECTIONS.USERS, { _id: id });
+    const user = await queryOne(COLLECTIONS.USERS, { _id: String(id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
     }
-    const borrowRecords = await query(COLLECTIONS.BORROW_RECORDS, { user_id: id });
-    const loginRecords = await query(COLLECTIONS.LOGIN_RECORDS, { user_id: id });
+    const userIdStr = String(user._id);
+    const borrowRecords = await query(COLLECTIONS.BORROW_RECORDS, { user_id: userIdStr });
+    const loginRecords = await query(COLLECTIONS.LOGIN_RECORDS, { user_id: userIdStr });
     borrowRecords.sort((a, b) => new Date(b.borrow_date) - new Date(a.borrow_date));
     loginRecords.sort((a, b) => new Date(b.login_time) - new Date(a.login_time));
     res.json({
@@ -478,6 +524,44 @@ app.get('/api/users/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('获取用户详情失败:', err);
+    res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const { username, password, nickname, role, status, email, phone } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ code: 400, message: '用户名和密码不能为空' });
+    }
+    if (username.length < 3) {
+      return res.status(400).json({ code: 400, message: '用户名至少3位' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ code: 400, message: '密码至少6位' });
+    }
+    const existing = await queryOne(COLLECTIONS.USERS, { username });
+    if (existing) {
+      return res.status(409).json({ code: 409, message: '用户名已存在' });
+    }
+    const userId = generateUserId();
+    const newUser = {
+      _id: userId,
+      username,
+      password: hashPassword(password),
+      nickname: nickname || username,
+      avatar: '',
+      email: email || '',
+      phone: phone || '',
+      member_level: 'normal',
+      role: role === 'admin' ? 'admin' : 'user',
+      status: (status === 1 || status === '1' || status === true || status === 'active') ? 'active' : 'disabled',
+      created_at: new Date().toISOString()
+    };
+    await create(COLLECTIONS.USERS, newUser);
+    res.json({ code: 0, data: sanitizeUser(newUser) });
+  } catch (err) {
+    console.error('创建用户失败:', err);
     res.status(500).json({ code: 500, message: err.message });
   }
 });
@@ -515,9 +599,7 @@ app.post('/api/categories', async (req, res) => {
     }
     const newCategory = { name, sort, enabled };
     const result = await create(COLLECTIONS.CATEGORIES, newCategory);
-    newCategory.id = parseInt(result.id);
-    newCategory._id = String(result.id);
-    res.json({ code: 0, data: { _id: result.id, id: parseInt(result.id), ...newCategory } });
+    res.json({ code: 0, data: { _id: result._id, ...newCategory } });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
   }
@@ -626,12 +708,15 @@ app.get('/api/products/:id', async (req, res) => {
 app.post('/api/products', async (req, res) => {
   try {
     const { name, description, price, image, category_id, on_sale = true, rating = 0, sort = 0, author, code, year, stock = 1, category_name } = req.body;
+    if (!name) {
+      return res.status(400).json({ code: 400, message: '书名不能为空' });
+    }
     const newProduct = {
       name,
       description: description || '',
       price,
       image: image || '',
-      category_id: category_id ? parseInt(category_id) : null,
+      category_id: category_id !== undefined && category_id !== '' && category_id !== null ? Number(category_id) : null,
       category_name: category_name || '',
       on_sale,
       rating,
@@ -642,9 +727,7 @@ app.post('/api/products', async (req, res) => {
       stock: stock
     };
     const result = await create(COLLECTIONS.BOOKS, newProduct);
-    newProduct.id = parseInt(result.id);
-    newProduct._id = String(result.id);
-    res.json({ code: 0, data: { _id: result.id, id: parseInt(result.id), ...newProduct } });
+    res.json({ code: 0, data: { _id: result._id, ...newProduct } });
   } catch (err) {
     console.error('创建图书失败:', err);
     res.status(500).json({ code: 500, message: err.message });
@@ -768,10 +851,18 @@ app.post('/api/borrow-records/batch-delete', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ code: 400, message: '缺少ID列表' });
     }
+    let ok = 0, fail = 0;
     for (const id of ids) {
-      await remove(COLLECTIONS.BORROW_RECORDS, id);
+      try {
+        let rec = await queryOne(COLLECTIONS.BORROW_RECORDS, { _id: id });
+        if (!rec) rec = await queryOne(COLLECTIONS.BORROW_RECORDS, { id: Number(id) });
+        if (!rec) { fail++; continue; }
+        await remove(COLLECTIONS.BORROW_RECORDS, rec._id);
+        ok++;
+      } catch (e) { fail++; }
     }
-    res.json({ code: 0, message: `成功删除 ${ids.length} 条记录` });
+    if (ok === 0) return res.status(404).json({ code: 404, message: '未找到任何可删除的记录' });
+    res.json({ code: 0, message: `成功删除 ${ok} 条记录`, deleted: ok, failed: fail });
   } catch (err) {
     res.status(500).json({ code: 500, message: err.message });
   }
@@ -780,10 +871,14 @@ app.post('/api/borrow-records/batch-delete', async (req, res) => {
 app.post('/api/borrow', async (req, res) => {
   try {
     const { product_id, user_id, user_name, days = 30 } = req.body;
-    if (!product_id || !user_id) {
-      return res.status(400).json({ code: 400, message: '缺少必要参数' });
+    if (!product_id) {
+      return res.status(400).json({ code: 400, message: '缺少图书ID' });
     }
-    let product = await queryOne(COLLECTIONS.BOOKS, { _id: product_id });
+    const effectiveUserId = user_id || req.userId;
+    if (!effectiveUserId) {
+      return res.status(400).json({ code: 400, message: '缺少用户ID' });
+    }
+    let product = await queryOne(COLLECTIONS.BOOKS, { _id: String(product_id) });
     if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(product_id) });
     if (!product) {
       return res.status(404).json({ code: 404, message: '图书不存在' });
@@ -791,9 +886,10 @@ app.post('/api/borrow', async (req, res) => {
     if (product.stock !== undefined && product.stock <= 0) {
       return res.status(409).json({ code: 409, message: '库存不足，无法借阅' });
     }
+    const productIdStr = String(product._id);
     const activeBorrow = await queryOne(COLLECTIONS.BORROW_RECORDS, {
-      product_id: String(product_id),
-      user_id: user_id,
+      product_id: productIdStr,
+      user_id: String(effectiveUserId),
       status: 'borrowed'
     });
     if (activeBorrow) {
@@ -802,9 +898,9 @@ app.post('/api/borrow', async (req, res) => {
     const borrowDate = new Date();
     const dueDate = new Date(borrowDate.getTime() + days * 24 * 60 * 60 * 1000);
     const newRecord = {
-      user_id: user_id,
+      user_id: String(effectiveUserId),
       user_name: user_name || '',
-      product_id: String(product_id),
+      product_id: productIdStr,
       product_name: product.name,
       product_image: product.image || '',
       product_code: product.code || '',
@@ -818,7 +914,7 @@ app.post('/api/borrow', async (req, res) => {
     if (product.stock !== undefined) {
       await update(COLLECTIONS.BOOKS, product._id, { stock: product.stock - 1 });
     }
-    newRecord._id = result.id;
+    newRecord._id = result._id;
     res.json({ code: 0, data: newRecord });
   } catch (err) {
     console.error('借阅失败:', err);
@@ -828,11 +924,12 @@ app.post('/api/borrow', async (req, res) => {
 
 app.post('/api/return', async (req, res) => {
   try {
-    const { record_id } = req.body;
+    const record_id = req.body.record_id || req.body.id;
     if (!record_id) {
       return res.status(400).json({ code: 400, message: '缺少记录ID' });
     }
-    const record = await queryOne(COLLECTIONS.BORROW_RECORDS, { _id: record_id });
+    let record = await queryOne(COLLECTIONS.BORROW_RECORDS, { _id: String(record_id) });
+    if (!record) record = await queryOne(COLLECTIONS.BORROW_RECORDS, { id: Number(record_id) });
     if (!record) {
       return res.status(404).json({ code: 404, message: '借阅记录不存在' });
     }
@@ -862,14 +959,35 @@ app.get('/api/borrow-records', async (req, res) => {
     const { user_id, status } = req.query;
     let condition = {};
     if (user_id) {
-      condition.user_id = user_id;
+      condition.user_id = String(user_id);
     }
     if (status) {
       condition.status = status;
     }
     const records = await query(COLLECTIONS.BORROW_RECORDS, condition);
     records.sort((a, b) => new Date(b.borrow_date) - new Date(a.borrow_date));
-    res.json({ code: 0, data: records });
+    const result = records.map(r => ({ ...r, id: r._id }));
+    res.json({ code: 0, data: result });
+  } catch (err) {
+    console.error('获取借阅记录失败:', err);
+    res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
+app.get('/api/borrows', async (req, res) => {
+  try {
+    const { user_id, status } = req.query;
+    let condition = {};
+    if (user_id) {
+      condition.user_id = String(user_id);
+    }
+    if (status) {
+      condition.status = status;
+    }
+    const records = await query(COLLECTIONS.BORROW_RECORDS, condition);
+    records.sort((a, b) => new Date(b.borrow_date) - new Date(a.borrow_date));
+    const result = records.map(r => ({ ...r, id: r._id }));
+    res.json({ code: 0, data: result });
   } catch (err) {
     console.error('获取借阅记录失败:', err);
     res.status(500).json({ code: 500, message: err.message });
@@ -975,7 +1093,7 @@ app.post('/api/import', async (req, res) => {
         const itemData = { name: item.name, sort: item.sort || 0, enabled: item.enabled !== false };
         const result = await create(COLLECTIONS.CATEGORIES, itemData);
         importResults.categories = importResults.categories || [];
-        importResults.categories.push({ ...itemData, _id: result.id, id: parseInt(result.id) });
+        importResults.categories.push({ ...itemData, _id: result._id });
       }
     }
     if (data.products && Array.isArray(data.products)) {
@@ -1003,13 +1121,13 @@ app.post('/api/import', async (req, res) => {
         };
         const result = await create(COLLECTIONS.BOOKS, itemData);
         importResults.products = importResults.products || [];
-        importResults.products.push({ ...itemData, _id: result.id, id: parseInt(result.id) });
+        importResults.products.push({ ...itemData, _id: result._id });
       }
     }
     if (data.users && Array.isArray(data.users)) {
       for (const item of data.users) {
         const itemData = {
-          _id: item.id,
+          _id: item._id || item.id,
           username: item.username,
           password: item.password,
           nickname: item.nickname || item.username,
@@ -1022,7 +1140,7 @@ app.post('/api/import', async (req, res) => {
         };
         const result = await create(COLLECTIONS.USERS, itemData);
         importResults.users = importResults.users || [];
-        importResults.users.push({ ...itemData, _id: result.id });
+        importResults.users.push({ ...itemData, _id: result._id });
       }
     }
     res.json({ code: 0, data: importResults });

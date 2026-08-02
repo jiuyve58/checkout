@@ -209,7 +209,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
         <div class="toolbar-actions">
           <select class="select-input" v-model="productFilterCategory" style="width:160px">
             <option value="">全部分类</option>
-            <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+            <option v-for="cat in categories" :key="cat._id" :value="cat.id">{{ cat.name }}</option>
           </select>
           <button class="btn btn-secondary btn-sm" @click="toggleAllProducts">
             {{ selectedProductIds.length === filteredProducts.length && filteredProducts.length > 0 ? '取消全选' : '全选' }}
@@ -279,8 +279,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
           </tr>
         </thead>
         <tbody>
-          <tr v-for="rec in filteredBorrows" :key="rec.id">
-            <td>{{ rec.id }}</td>
+          <tr v-for="rec in filteredBorrows" :key="rec._id">
+            <td>{{ rec._id ? rec._id.slice(-6) : '-' }}</td>
             <td>{{ getProductName(rec.product_id) }}</td>
             <td>{{ rec.user_name }}</td>
             <td>{{ formatDate(rec.borrow_date) }}</td>
@@ -290,7 +290,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
               </span>
             </td>
             <td class="actions">
-              <button v-if="rec.status === 'borrowed'" class="btn btn-success btn-sm" @click="returnBook(rec.id)">归还</button>
+              <button v-if="rec.status === 'borrowed'" class="btn btn-success btn-sm" @click="returnBook(rec._id)">归还</button>
               <span v-else style="color:#999;font-size:12px">已完成</span>
             </td>
           </tr>
@@ -331,7 +331,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
             <td>{{ user.id }}</td>
             <td>{{ user.username }}</td>
             <td><span :class="['badge', user.role === 'admin' ? 'badge-warning' : 'badge-info']">{{ user.role === 'admin' ? '管理员' : '普通用户' }}</span></td>
-            <td><span :class="['badge', user.status === 1 ? 'badge-success' : 'badge-danger']">{{ user.status === 1 ? '启用' : '禁用' }}</span></td>
+            <td><span :class="['badge', user.status === 'active' ? 'badge-success' : 'badge-danger']">{{ user.status === 'active' ? '启用' : '禁用' }}</span></td>
             <td>{{ formatDate(user.created_at) }}</td>
             <td class="actions">
               <button class="btn btn-secondary btn-sm" @click="openUserModal(user)">编辑</button>
@@ -376,7 +376,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
       <label>分类</label>
       <select class="select-input" v-model="productModal.data.category_id">
         <option :value="''">请选择分类</option>
-        <option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+        <option v-for="cat in categories" :key="cat._id" :value="cat.id">{{ cat.name }}</option>
       </select>
     </div>
     <div class="form-group">
@@ -401,8 +401,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
     <div class="form-group">
       <label>选择书籍</label>
       <div class="product-list">
-        <div v-for="prod in products" :key="prod.id"
-             :class="['product-item', prod.stock <= 0 ? 'out' : '', borrowModal.data.product_id === prod.id ? 'active' : '']"
+        <div v-for="prod in products" :key="prod._id"
+             :class="['product-item', prod.stock <= 0 ? 'out' : '', borrowModal.data.product_id === prod._id ? 'active' : '']"
              @click="selectBorrowProduct(prod)">
           <div class="product-info">
             <div class="product-name">{{ prod.name }}</div>
@@ -442,9 +442,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
     </div>
     <div class="form-group">
       <label>状态</label>
-      <select class="select-input" v-model.number="userModal.data.status">
-        <option :value="1">启用</option>
-        <option :value="0">禁用</option>
+      <select class="select-input" v-model="userModal.data.status">
+        <option value="active">启用</option>
+        <option value="disabled">禁用</option>
       </select>
     </div>
     <div class="form-actions">
@@ -754,7 +754,7 @@ const app = createApp({
 
     const selectBorrowProduct = (prod) => {
       if (prod.stock <= 0) return;
-      borrowModal.data.product_id = prod.id;
+      borrowModal.data.product_id = prod._id;
     };
 
     const saveBorrow = async () => {
@@ -774,7 +774,7 @@ const app = createApp({
       if (!confirm('确定归还此书?')) return;
       try {
         await apiFetch('/return', {
-          method: 'POST', body: JSON.stringify({ id })
+          method: 'POST', body: JSON.stringify({ record_id: id })
         });
         showToast('归还成功', 'success');
         loadBorrows();
@@ -784,7 +784,7 @@ const app = createApp({
 
     const openUserModal = (user = null) => {
       userModal.isEdit = !!user;
-      userModal.data = user ? { ...user } : { username: '', password: '', role: 'user', status: 1 };
+      userModal.data = user ? { ...user } : { username: '', password: '', role: 'user', status: 'active' };
       userModal.show = true;
     };
 
@@ -792,14 +792,16 @@ const app = createApp({
       if (!userModal.data.username) { showToast('请输入用户名', 'error'); return; }
       if (!userModal.isEdit && !userModal.data.password) { showToast('请输入密码', 'error'); return; }
       try {
+        const payload = { ...userModal.data };
+        if (userModal.isEdit && !payload.password) delete payload.password;
         if (userModal.isEdit) {
           await apiFetch('/users/' + userModal.data._id, {
-            method: 'PUT', body: JSON.stringify(userModal.data)
+            method: 'PUT', body: JSON.stringify(payload)
           });
           showToast('更新成功', 'success');
         } else {
           await apiFetch('/users', {
-            method: 'POST', body: JSON.stringify(userModal.data)
+            method: 'POST', body: JSON.stringify(payload)
           });
           showToast('新增成功', 'success');
         }

@@ -99,7 +99,8 @@ async function queryOne(name, condition = {}) {
 async function create(name, data) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
   const doc = { ...data };
-  delete doc._id;
+  const hasCustomId = doc._id !== undefined && doc._id !== null && doc._id !== '';
+  if (!hasCustomId) delete doc._id;
   const res = await Promise.race([
     getCloudCollection(name).add(doc),
     new Promise((_, rej) => setTimeout(() => rej(new Error('create timeout:' + name)), DB_OP_TIMEOUT))
