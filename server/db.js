@@ -13,7 +13,7 @@ const COLLECTIONS = {
 const TCB_ENV = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
 const TCB_SECRETID = process.env.TENCENTCLOUD_SECRETID || '';
 const TCB_SECRETKEY = process.env.TENCENTCLOUD_SECRETKEY || '';
-const TCB_API_HOST = 'tcb-api.tencentcloudapi.com';
+const TCB_API_HOST = 'tcb.tencentcloudapi.com';
 
 let cloudReady = false;
 let lastInitError = '';
@@ -88,7 +88,8 @@ function tcbApiCall(action, params) {
             resolve(json.Response);
           }
         } catch (e) {
-          reject(new Error(`Invalid JSON: ${data.slice(0, 200)}`));
+          console.error('[API] 原始响应:', data.slice(0, 500));
+          reject(new Error(`Invalid JSON: ${data.slice(0, 100)}`));
         }
       });
     });
