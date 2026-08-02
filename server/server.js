@@ -9,7 +9,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.set('trust proxy', true);
-app.use(cors());
+app.use(cors({
+  origin: function(origin, callback) {
+    callback(null, true);
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(__dirname));
 
@@ -63,6 +68,7 @@ function sanitizeUser(user) {
     email: user.email || '',
     phone: user.phone || '',
     member_level: user.member_level || 'normal',
+    role: user.role || 'user',
     status: user.status || 'active',
     created_at: user.created_at
   };
@@ -85,7 +91,7 @@ async function recordLogin(user, req, loginType) {
 
 app.post('/api/register', async (req, res) => {
   try {
-    const { username, password, nickname } = req.body;
+    const { username, password, nickname, role } = req.body;
     if (!username || !password) {
       return res.status(400).json({ code: 400, message: '用户名和密码不能为空' });
     }
@@ -109,6 +115,7 @@ app.post('/api/register', async (req, res) => {
       email: '',
       phone: '',
       member_level: 'normal',
+      role: role === 'admin' ? 'admin' : 'user',
       status: 'active',
       created_at: new Date().toISOString()
     };
@@ -156,6 +163,52 @@ app.post('/api/login', async (req, res) => {
     });
   } catch (err) {
     console.error('登录失败:', err);
+    res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
+app.post('/api/admin-register', async (req, res) => {
+  try {
+    const { username, password, nickname } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ code: 400, message: '用户名和密码不能为空' });
+    }
+    if (username.length < 3) {
+      return res.status(400).json({ code: 400, message: '用户名至少3位' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ code: 400, message: '密码至少6位' });
+    }
+    const existing = await queryOne(COLLECTIONS.USERS, { username });
+    if (existing) {
+      return res.status(409).json({ code: 409, message: '用户名已存在' });
+    }
+    const userId = generateUserId();
+    const newUser = {
+      _id: userId,
+      username,
+      password: hashPassword(password),
+      nickname: nickname || username,
+      avatar: '',
+      email: '',
+      phone: '',
+      member_level: 'normal',
+      role: 'admin',
+      status: 'active',
+      created_at: new Date().toISOString()
+    };
+    await create(COLLECTIONS.USERS, newUser);
+    await recordLogin(newUser, req, 'register');
+    const token = generateToken(userId);
+    res.json({
+      code: 0,
+      data: {
+        token,
+        user: sanitizeUser(newUser)
+      }
+    });
+  } catch (err) {
+    console.error('管理员注册失败:', err);
     res.status(500).json({ code: 500, message: err.message });
   }
 });
@@ -631,6 +684,11 @@ app.get('/api/menus', (req, res) => {
     code: 0,
     data: [
       {
+        menu_id: 'dashboard',
+        text: '仪表盘',
+        value: '/pages/index/index'
+      },
+      {
         menu_id: 'book',
         text: '图书管理',
         value: '',
@@ -640,11 +698,13 @@ app.get('/api/menus', (req, res) => {
         ]
       },
       {
-        menu_id: 'user-log',
-        text: '用户日志',
+        menu_id: 'user-mgmt',
+        text: '用户管理',
         value: '',
         children: [
-          { menu_id: 'login-records', text: '登录记录', value: '/pages/system/safety/list' }
+          { menu_id: 'users', text: '用户列表', value: '/pages/users/list' },
+          { menu_id: 'borrow-records', text: '借阅记录', value: '/pages/borrow-records/list' },
+          { menu_id: 'login-records', text: '登录记录', value: '/pages/login-records/list' }
         ]
       }
     ]
@@ -791,6 +851,32 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`图书管理系统API服务已启动: http://localhost:${PORT}`);
   const isCloud = cloudAvailable();
   console.log(`数据库模式: ${isCloud ? '云数据库' : '文件存储(db.json)'}`);
+
+  // 自动创建默认管理员账号
+  try {
+    const adminExists = await queryOne(COLLECTIONS.USERS, { role: 'admin' });
+    if (!adminExists) {
+      const adminId = generateUserId();
+      const adminUser = {
+        _id: adminId,
+        username: 'admin',
+        password: hashPassword('admin123'),
+        nickname: '系统管理员',
+        avatar: '',
+        email: '',
+        phone: '',
+        member_level: 'vip',
+        role: 'admin',
+        status: 'active',
+        created_at: new Date().toISOString()
+      };
+      await create(COLLECTIONS.USERS, adminUser);
+      console.log('[系统] 已创建默认管理员账号: admin / admin123');
+    }
+  } catch (err) {
+    console.warn('[系统] 检查/创建管理员失败:', err.message);
+  }
+
   if (isCloud) {
     try {
       await seedDataFromLocal();

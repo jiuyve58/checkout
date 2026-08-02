@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+npm-debug.log
+
+# IDE
+.hbuilderx/
+.idea/
+.vscode/
+
+# Build output
+unpackage/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Backup files
+*.bak
+*.swp
+
+# Runtime data
+db.json.local
+
+# Admin build output (will be placed in server/admin/)
+admin-unpackage/
