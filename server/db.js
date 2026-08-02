@@ -16,6 +16,7 @@ const TCB_SECRETKEY = process.env.TENCENTCLOUD_SECRETKEY || '';
 const TCB_API_HOST = 'tcb-api.tencentcloudapi.com';
 
 let cloudReady = false;
+let lastInitError = '';
 
 const collectionMap = {
   categories: COLLECTIONS.CATEGORIES,
@@ -101,7 +102,8 @@ function tcbApiCall(action, params) {
 async function initCloud() {
   if (cloudReady) return true;
   if (!TCB_SECRETID || !TCB_SECRETKEY) {
-    console.error('[数据库] 缺少 TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY 环境变量');
+    lastInitError = '缺少 TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY 环境变量';
+    console.error('[数据库]', lastInitError);
     return false;
   }
   try {
@@ -109,10 +111,13 @@ async function initCloud() {
     const resp = await tcbApiCall('DescribeEnvs', {});
     console.log('[数据库] CloudBase API 连接成功,返回 envs:', resp.EnvList ? resp.EnvList.length : 0);
     cloudReady = true;
+    lastInitError = '';
     return true;
   } catch (err) {
-    console.error('[数据库] CloudBase API 连接失败:', err.message);
-    return false;
+    lastInitError = err.message;
+    console.warn('[数据库] DescribeEnvs 失败,仍启用(直接操作数据库):', err.message);
+    cloudReady = true;
+    return true;
   }
 }
 
@@ -279,5 +284,6 @@ module.exports = {
   seedDataFromLocal,
   importDataFromJson,
   waitForDb,
-  initCloud
+  initCloud,
+  getLastInitError: () => lastInitError
 };

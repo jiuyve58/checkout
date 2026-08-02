@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
-const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromJson, seedDataFromLocal, waitForDb, initCloud } = require('./db');
+const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromJson, seedDataFromLocal, waitForDb, initCloud, getLastInitError } = require('./db');
 const seedData = require('./seed-data');
 
 const app = express();
@@ -25,12 +25,14 @@ app.use(async (req, res, next) => {
 
 app.use(express.static(__dirname));
 
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+  await waitForDb(3000);
   res.json({
     code: 0,
     status: 'ok',
     time: new Date().toISOString(),
     db_mode: cloudAvailable() ? 'cloud' : 'disconnected',
+    db_init_error: getLastInitError() || '',
     cloud_env: process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff',
     env_vars: {
       TCB_ENV: process.env.TCB_ENV || '(not set)',
