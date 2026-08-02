@@ -83,7 +83,7 @@ function getCloudCollection(name) {
   return cloudDb.collection(collectionName);
 }
 
-const CLOUD_OP_TIMEOUT = Number(process.env.TCB_OP_TIMEOUT) || 3500;
+const CLOUD_OP_TIMEOUT = Number(process.env.TCB_OP_TIMEOUT) || 5000;
 function wrapCloud(promise, opName) {
   return Promise.race([
     promise,
@@ -107,16 +107,24 @@ async function query(name, condition = {}) {
   let col = getCloudCollection(name);
   let res;
   if (Object.keys(condition).length > 0) {
-    res = await wrapCloud(col.where(condition).get(), `query(${name} where)`);
+    res = await wrapCloud(col.where(condition).limit(100).get(), `query(${name} where)`);
   } else {
-    res = await wrapCloud(col.get(), `query(${name} all)`);
+    res = await wrapCloud(col.limit(1000).get(), `query(${name} all)`);
   }
   return res.data.map(normalizeItem);
 }
 
 async function queryOne(name, condition = {}) {
-  const data = await query(name, condition);
-  return data.length > 0 ? data[0] : null;
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
+  let col = getCloudCollection(name);
+  let res;
+  if (Object.keys(condition).length > 0) {
+    res = await wrapCloud(col.where(condition).limit(1).get(), `queryOne(${name} where)`);
+  } else {
+    res = await wrapCloud(col.limit(1).get(), `queryOne(${name} all)`);
+  }
+  const items = res.data.map(normalizeItem);
+  return items.length > 0 ? items[0] : null;
 }
 
 async function create(name, data) {

@@ -42,6 +42,51 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/api/test-db', async (req, res) => {
+  try {
+    await waitForDb(2000);
+    if (!cloudAvailable()) {
+      return res.status(503).json({ code: 503, message: '云数据库未连接' });
+    }
+    const cloudbase = require('@cloudbase/node-sdk');
+    const envId = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
+    const app = cloudbase.init({ envId });
+    const db = app.database();
+    const _ = db.command;
+
+    const results = {};
+    for (const colName of ['users', 'books', 'categories']) {
+      try {
+        const col = db.collection(colName);
+        const t0 = Date.now();
+        const snapshot = await Promise.race([
+          col.limit(1).get(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+        ]);
+        results[colName] = { count: snapshot.data.length, time: Date.now() - t0 + 'ms' };
+      } catch (e) {
+        results[colName] = { error: e.message };
+      }
+    }
+
+    try {
+      const t0 = Date.now();
+      const col = db.collection('users');
+      const snapshot = await Promise.race([
+        col.where({ username: 'admin' }).limit(1).get(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+      ]);
+      results['users_where_admin'] = { count: snapshot.data.length, time: Date.now() - t0 + 'ms' };
+    } catch (e) {
+      results['users_where_admin'] = { error: e.message };
+    }
+
+    res.json({ code: 0, data: results });
+  } catch (err) {
+    res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
 function generateUserId() {
   const timestamp = Date.now().toString(36);
   const random = crypto.randomBytes(4).toString('hex');
@@ -243,7 +288,7 @@ app.post('/api/logout', authMiddleware, (req, res) => {
   res.json({ code: 0, message: '退出成功' });
 });
 
-const PUBLIC_PATHS = ['/health', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-json', '/api/reset-seed', '/'];
+const PUBLIC_PATHS = ['/health', '/api/test-db', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-json', '/api/reset-seed', '/'];
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.includes(req.path) || !req.path.startsWith('/api/')) return next();
   authMiddleware(req, res, next);
