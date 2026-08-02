@@ -1,5 +1,4 @@
-const fs = require('fs');
-const path = require('path');
+const seedData = require('./seed-data');
 
 const COLLECTIONS = {
   CATEGORIES: 'categories',
@@ -8,8 +7,6 @@ const COLLECTIONS = {
   BORROW_RECORDS: 'borrow_records',
   LOGIN_RECORDS: 'login_records'
 };
-
-const DATA_FILE = path.join(__dirname, 'db.json');
 
 let cloudDb = null;
 let cloudReady = false;
@@ -22,19 +19,13 @@ const collectionMap = {
   loginRecords: COLLECTIONS.LOGIN_RECORDS
 };
 
-const reverseMap = {};
-for (const [k, v] of Object.entries(collectionMap)) {
-  reverseMap[v] = k;
-}
-
 function initCloud() {
   if (cloudReady) return Promise.resolve(true);
   const timeoutMs = Number(process.env.TCB_INIT_TIMEOUT) || 2500;
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       if (!cloudReady) {
-        console.warn(`[数据库] 云数据库初始化超时(${timeoutMs}ms),降级为文件存储`);
-        cloudReady = false;
+        console.error(`[数据库] 云数据库初始化超时(${timeoutMs}ms)`);
         resolve(false);
       }
     }, timeoutMs);
@@ -44,7 +35,6 @@ function initCloud() {
         console.log('[数据库] TCB_ENV:', process.env.TCB_ENV || '(未设置,使用默认)');
         console.log('[数据库] SECRETID:', process.env.TENCENTCLOUD_SECRETID ? '已设置' : '未设置');
         console.log('[数据库] SECRETKEY:', process.env.TENCENTCLOUD_SECRETKEY ? '已设置' : '未设置');
-        console.log('[数据库] SCF_RUNTIME:', process.env.SCF_RUNTIME || '(非云函数)');
 
         const cloudbase = require('@cloudbase/node-sdk');
         const envId = process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff';
@@ -94,63 +84,11 @@ function getCloudCollection(name) {
 }
 
 const CLOUD_OP_TIMEOUT = Number(process.env.TCB_OP_TIMEOUT) || 3500;
-let cloudFailedStreak = 0;
-const CLOUD_FAIL_THRESHOLD = 2;
-function markCloudFail(msg) {
-  cloudFailedStreak += 1;
-  console.warn(`[云数据库] 第${cloudFailedStreak}次失败:`, msg);
-  if (cloudFailedStreak >= CLOUD_FAIL_THRESHOLD) {
-    cloudReady = false;
-    console.warn(`[云数据库] 连续失败${cloudFailedStreak}次,临时降级为文件存储`);
-  }
-}
-function markCloudOk() {
-  cloudFailedStreak = 0;
-}
 function wrapCloud(promise, opName) {
   return Promise.race([
     promise,
     new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout:${opName}`)), CLOUD_OP_TIMEOUT))
   ]);
-}
-
-function readLocalData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const content = fs.readFileSync(DATA_FILE, 'utf-8');
-      return JSON.parse(content);
-    }
-  } catch (err) {
-    console.error('读取本地数据失败:', err.message);
-  }
-  return { categories: [], products: [], users: [], borrowRecords: [], loginRecords: [] };
-}
-
-function writeLocalData(data) {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('写入本地数据失败:', err.message);
-  }
-}
-
-function getLocalItems(name) {
-  const localData = readLocalData();
-  const key = collectionMap[name] || name;
-  return localData[key] || [];
-}
-
-function getLocalKey(name) {
-  return collectionMap[name] || name;
-}
-
-function getNextLocalId(items) {
-  let maxId = 0;
-  items.forEach(item => {
-    const id = parseInt(item._id || item.id);
-    if (!isNaN(id) && id > maxId) maxId = id;
-  });
-  return maxId + 1;
 }
 
 function normalizeItem(item) {
@@ -165,32 +103,15 @@ function normalizeItem(item) {
 }
 
 async function query(name, condition = {}) {
-  if (cloudAvailable()) {
-    try {
-      let col = getCloudCollection(name);
-      let res;
-      if (Object.keys(condition).length > 0) {
-        res = await wrapCloud(col.where(condition).get(), `query(${name} where)`);
-      } else {
-        res = await wrapCloud(col.get(), `query(${name} all)`);
-      }
-      markCloudOk();
-      return res.data.map(normalizeItem);
-    } catch (err) {
-      markCloudFail(err.message);
-      console.warn('[云数据库] query失败，降级为文件存储:', err.message);
-    }
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
+  let col = getCloudCollection(name);
+  let res;
+  if (Object.keys(condition).length > 0) {
+    res = await wrapCloud(col.where(condition).get(), `query(${name} where)`);
+  } else {
+    res = await wrapCloud(col.get(), `query(${name} all)`);
   }
-  
-  let items = getLocalItems(name);
-  items = items.map(normalizeItem);
-  if (Object.keys(condition).length === 0) return items;
-  return items.filter(item => {
-    return Object.keys(condition).every(key => {
-      const itemVal = item[key] !== undefined ? item[key] : item[key.replace('_', '')];
-      return String(itemVal) === String(condition[key]);
-    });
-  });
+  return res.data.map(normalizeItem);
 }
 
 async function queryOne(name, condition = {}) {
@@ -199,83 +120,28 @@ async function queryOne(name, condition = {}) {
 }
 
 async function create(name, data) {
-  if (cloudAvailable()) {
-    try {
-      const col = getCloudCollection(name);
-      const doc = { ...data };
-      delete doc._id;
-      const res = await wrapCloud(col.add(doc), `create(${name})`);
-      markCloudOk();
-      return { _id: res.id, ...data };
-    } catch (err) {
-      markCloudFail(err.message);
-      console.warn('[云数据库] create失败，降级为文件存储:', err.message);
-    }
-  }
-  
-  const localData = readLocalData();
-  const localKey = getLocalKey(name);
-  if (!localData[localKey]) localData[localKey] = [];
-  if (!data._id) {
-    data._id = String(getNextLocalId(localData[localKey]));
-  }
-  localData[localKey].push(data);
-  writeLocalData(localData);
-  return { _id: data._id, ...data };
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
+  const col = getCloudCollection(name);
+  const doc = { ...data };
+  delete doc._id;
+  const res = await wrapCloud(col.add(doc), `create(${name})`);
+  return { _id: res.id, ...data };
 }
 
 async function update(name, docId, data) {
-  if (cloudAvailable()) {
-    try {
-      const col = getCloudCollection(name);
-      const updateData = { ...data };
-      delete updateData._id;
-      await wrapCloud(col.doc(String(docId)).update(updateData), `update(${name})`);
-      markCloudOk();
-      return { _id: docId, ...data };
-    } catch (err) {
-      markCloudFail(err.message);
-      console.warn('[云数据库] update失败，降级为文件存储:', err.message);
-    }
-  }
-  
-  const localData = readLocalData();
-  const localKey = getLocalKey(name);
-  if (localData[localKey]) {
-    const item = localData[localKey].find(i => String(i._id || i.id) === String(docId));
-    if (item) {
-      Object.assign(item, data);
-      writeLocalData(localData);
-      return { _id: docId, ...item };
-    }
-  }
-  return null;
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
+  const col = getCloudCollection(name);
+  const updateData = { ...data };
+  delete updateData._id;
+  await wrapCloud(col.doc(String(docId)).update(updateData), `update(${name})`);
+  return { _id: docId, ...data };
 }
 
 async function remove(name, docId) {
-  if (cloudAvailable()) {
-    try {
-      const col = getCloudCollection(name);
-      await wrapCloud(col.doc(String(docId)).remove(), `remove(${name})`);
-      markCloudOk();
-      return { success: true };
-    } catch (err) {
-      markCloudFail(err.message);
-      console.warn('[云数据库] remove失败，降级为文件存储:', err.message);
-    }
-  }
-  
-  const localData = readLocalData();
-  const localKey = getLocalKey(name);
-  if (localData[localKey]) {
-    const index = localData[localKey].findIndex(i => String(i._id || i.id) === String(docId));
-    if (index !== -1) {
-      localData[localKey].splice(index, 1);
-      writeLocalData(localData);
-      return { success: true };
-    }
-  }
-  return null;
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
+  const col = getCloudCollection(name);
+  await wrapCloud(col.doc(String(docId)).remove(), `remove(${name})`);
+  return { success: true };
 }
 
 async function aggregate(name) {
@@ -283,41 +149,32 @@ async function aggregate(name) {
 }
 
 async function seedDataFromLocal() {
-  if (cloudAvailable()) {
-    console.log('[数据库] 检查云数据库集合状态...');
-    const localData = readLocalData();
-    const importMap = [
-      { name: 'categories', items: localData.categories || [] },
-      { name: 'products', items: localData.products || [] },
-      { name: 'users', items: localData.users || [] },
-      { name: 'borrowRecords', items: localData.borrowRecords || [] },
-      { name: 'loginRecords', items: localData.loginRecords || [] }
-    ];
-    for (const { name, items } of importMap) {
-      if (!items || items.length === 0) continue;
-      try {
-        const existing = await query(name);
-        if (existing.length === 0) {
-          for (const item of items) {
-            await create(name, item);
-          }
-          console.log(`[数据库] 已导入 ${items.length} 条${name}数据到云数据库`);
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
+  console.log('[数据库] 检查云数据库集合状态...');
+  const importMap = [
+    { name: 'categories', items: seedData.categories || [] },
+    { name: 'products', items: seedData.products || [] }
+  ];
+  for (const { name, items } of importMap) {
+    if (!items || items.length === 0) continue;
+    try {
+      const existing = await query(name);
+      if (existing.length === 0) {
+        for (const item of items) {
+          await create(name, item);
         }
-      } catch (err) {
-        console.warn(`[数据库] 导入${name}失败:`, err.message);
+        console.log(`[数据库] 已导入 ${items.length} 条${name}数据到云数据库`);
+      } else {
+        console.log(`[数据库] ${name} 已有 ${existing.length} 条数据,跳过导入`);
       }
+    } catch (err) {
+      console.warn(`[数据库] 导入${name}失败:`, err.message);
     }
-  } else {
-    console.log('[数据库] 使用文件存储模式');
   }
 }
 
-async function importDataFromLocal() {
-  const localData = readLocalData();
-  return importDataFromJson(localData);
-}
-
 async function importDataFromJson(data) {
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
   const results = {};
   const importMap = [
     { name: 'categories', items: data.categories || [], key: 'categories' },
@@ -328,32 +185,22 @@ async function importDataFromJson(data) {
   ];
   for (const { name, items, key } of importMap) {
     if (!items || items.length === 0) continue;
-    if (cloudAvailable()) {
-      let imported = 0;
-      for (const item of items) {
-        try {
-          await create(name, item);
-          imported++;
-        } catch (err) {
-          console.warn(`[数据库] 导入${name}项失败:`, err.message);
-        }
+    let imported = 0;
+    for (const item of items) {
+      try {
+        await create(name, item);
+        imported++;
+      } catch (err) {
+        console.warn(`[数据库] 导入${name}项失败:`, err.message);
       }
-      results[key] = { imported, failed: items.length - imported };
-    } else {
-      const localKey = getLocalKey(name);
-      const localData = readLocalData();
-      localData[localKey] = items;
-      writeLocalData(localData);
-      results[key] = { imported: items.length, failed: 0 };
     }
+    results[key] = { imported, failed: items.length - imported };
   }
   return results;
 }
 
-Promise.resolve().then(() => initCloud());
-
 const dbInitPromise = Promise.resolve().then(() => initCloud());
-function waitForDb(timeoutMs = 1500) {
+function waitForDb(timeoutMs = 2000) {
   if (cloudReady) return Promise.resolve(true);
   return Promise.race([
     dbInitPromise,
@@ -371,7 +218,6 @@ module.exports = {
   aggregate,
   cloudAvailable,
   seedDataFromLocal,
-  importDataFromLocal,
   importDataFromJson,
   waitForDb,
   initCloud

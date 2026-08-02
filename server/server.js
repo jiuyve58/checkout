@@ -1,9 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
-const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromLocal, importDataFromJson, seedDataFromLocal, waitForDb, initCloud } = require('./db');
+const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromJson, seedDataFromLocal, waitForDb, initCloud } = require('./db');
+const seedData = require('./seed-data');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,7 +30,7 @@ app.get('/health', (req, res) => {
     code: 0,
     status: 'ok',
     time: new Date().toISOString(),
-    db_mode: cloudAvailable() ? 'cloud' : 'file',
+    db_mode: cloudAvailable() ? 'cloud' : 'disconnected',
     cloud_env: process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff',
     env_vars: {
       TCB_ENV: process.env.TCB_ENV || '(not set)',
@@ -244,7 +243,7 @@ app.post('/api/logout', authMiddleware, (req, res) => {
   res.json({ code: 0, message: '退出成功' });
 });
 
-const PUBLIC_PATHS = ['/health', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-local', '/api/import-from-json', '/api/reset-seed', '/'];
+const PUBLIC_PATHS = ['/health', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/api/import', '/api/import-from-json', '/api/reset-seed', '/'];
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.includes(req.path) || !req.path.startsWith('/api/')) return next();
   authMiddleware(req, res, next);
@@ -899,43 +898,30 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
-app.post('/api/import-from-local', async (req, res) => {
-  try {
-    const results = await importDataFromLocal();
-    res.json({ code: 0, data: results, message: '导入完成' });
-  } catch (err) {
-    res.status(500).json({ code: 500, message: err.message });
-  }
-});
-
 app.get('/api/reset-seed', async (req, res) => {
   try {
-    const localData = JSON.parse(fs.readFileSync(path.join(__dirname, 'db.json'), 'utf-8'));
-    const results = {};
-    const targetCollections = ['categories', 'products', 'borrowRecords'];
-    for (const key of targetCollections) {
-      const items = localData[key] || [];
-      if (cloudAvailable()) {
-        try {
-          const existing = await query(key);
-          for (const item of existing) {
-            if (item._id) await remove(key, item._id);
-          }
-          let imported = 0;
-          for (const item of items) {
-            await create(key, item);
-            imported++;
-          }
-          results[key] = { imported };
-        } catch (err) {
-          results[key] = { error: err.message };
-        }
-      } else {
-        results[key] = { imported: items.length };
-      }
-    }
+    await waitForDb(2000);
     if (!cloudAvailable()) {
-      fs.writeFileSync(path.join(__dirname, 'db.json'), JSON.stringify(localData, null, 2), 'utf-8');
+      return res.status(503).json({ code: 503, message: '云数据库未连接,请检查环境变量配置' });
+    }
+    const results = {};
+    const targetCollections = ['categories', 'products'];
+    for (const key of targetCollections) {
+      const items = seedData[key] || [];
+      try {
+        const existing = await query(key);
+        for (const item of existing) {
+          if (item._id) await remove(key, item._id);
+        }
+        let imported = 0;
+        for (const item of items) {
+          await create(key, item);
+          imported++;
+        }
+        results[key] = { imported };
+      } catch (err) {
+        results[key] = { error: err.message };
+      }
     }
     res.json({ code: 0, data: results, message: '数据已重置' });
   } catch (err) {
@@ -971,7 +957,13 @@ app.listen(PORT, '0.0.0.0', () => {
   const checkAfterBoot = async () => {
     try { await initCloud(); } catch (e) {}
     const isCloud = cloudAvailable();
-    console.log(`数据库模式: ${isCloud ? '云数据库' : '文件存储(db.json)'}`);
+    console.log(`数据库模式: ${isCloud ? '云数据库' : '未连接'}`);
+
+    if (!isCloud) {
+      console.warn('[系统] 云数据库未连接,请检查环境变量 TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY');
+      console.warn('[系统] 可在 CloudBase 控制台 → 服务设置 → 环境变量 中配置');
+      return;
+    }
 
     try {
       const adminExists = await queryOne(COLLECTIONS.USERS, { role: 'admin' });
@@ -997,15 +989,11 @@ app.listen(PORT, '0.0.0.0', () => {
       console.warn('[系统] 检查/创建管理员失败:', err.message);
     }
 
-    if (isCloud) {
-      try {
-        await seedDataFromLocal();
-        console.log('[数据库] 数据初始化检查完成');
-      } catch (err) {
-        console.warn('[数据库] 数据初始化失败:', err.message);
-      }
-    } else {
-      console.log('提示: 部署后如需导入数据，访问 /api/import-from-local');
+    try {
+      await seedDataFromLocal();
+      console.log('[数据库] 数据初始化检查完成');
+    } catch (err) {
+      console.warn('[数据库] 数据初始化失败:', err.message);
     }
   };
   checkAfterBoot().catch(() => {});
