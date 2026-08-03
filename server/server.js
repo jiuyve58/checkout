@@ -229,20 +229,21 @@ app.post('/api/login', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ code: 400, message: '用户名和密码不能为空' });
     }
-    const user = await queryOne(COLLECTIONS.USERS, { username });
+    const user = await Promise.race([
+      queryOne(COLLECTIONS.USERS, { username: String(username).trim() }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('LOGIN_QUERY_TIMEOUT')), 5000))
+    ]);
     if (!user) {
-      return res.status(404).json({ code: 404, message: '用户不存在' });
+      return res.status(401).json({ code: 401, message: '用户名或密码错误' });
     }
     if (user.password !== hashPassword(password)) {
-      return res.status(401).json({ code: 401, message: '密码错误' });
+      return res.status(401).json({ code: 401, message: '用户名或密码错误' });
     }
     if (user.status !== 'active') {
       return res.status(403).json({ code: 403, message: '账号已被禁用' });
     }
     const token = generateToken(user._id);
     storeToken(token, user._id);
-    await update(COLLECTIONS.USERS, user._id, { last_login_at: new Date().toISOString() });
-    await recordLogin(user, req, 'login');
     res.json({
       code: 0,
       data: {
@@ -250,9 +251,22 @@ app.post('/api/login', async (req, res) => {
         user: sanitizeUser(user)
       }
     });
+    Promise.allSettled([
+      update(COLLECTIONS.USERS, user._id, { last_login_at: new Date().toISOString() }),
+      recordLogin(user, req, 'login')
+    ]).then(results => {
+      results.forEach(result => {
+        if (result.status === 'rejected') {
+          console.warn('登录后续记录失败:', result.reason && result.reason.message);
+        }
+      });
+    });
   } catch (err) {
     console.error('登录失败:', err);
-    res.status(500).json({ code: 500, message: err.message });
+    if (err.message === 'LOGIN_QUERY_TIMEOUT' || /timeout/i.test(err.message || '')) {
+      return res.status(503).json({ code: 503, message: '登录服务响应超时，请稍后重试' });
+    }
+    res.status(500).json({ code: 500, message: '登录服务暂不可用，请稍后重试' });
   }
 });
 
