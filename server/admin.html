@@ -247,6 +247,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
             <option value="">全部分类</option>
             <option v-for="cat in categories" :key="cat._id" :value="String(cat.id)">{{ cat.name }}</option>
           </select>
+          <button class="btn btn-secondary btn-sm" @click="downloadProductTemplate">下载模板</button>
+          <button class="btn btn-success btn-sm" @click="chooseProductImport" :disabled="importingProducts">
+            {{ importingProducts ? '正在导入...' : '导入 Excel' }}
+          </button>
+          <input
+            ref="productImportInput"
+            type="file"
+            accept=".xlsx,.xls"
+            style="display:none"
+            @change="importProductsFromExcel"
+          >
+          <button class="btn btn-success btn-sm" @click="exportProducts">导出 Excel</button>
           <button class="btn btn-secondary btn-sm" @click="toggleAllProducts">
             {{ selectedProductIds.length === filteredProducts.length && filteredProducts.length > 0 ? '取消全选' : '全选' }}
           </button>
@@ -300,6 +312,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
             <option value="borrowed">借阅中</option>
             <option value="returned">已归还</option>
           </select>
+          <button class="btn btn-success btn-sm" @click="exportBorrows">导出 Excel</button>
           <button class="btn btn-primary btn-sm" @click="openBorrowModal()">+ 新增借阅</button>
         </div>
       </div>
@@ -502,6 +515,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
 </div>
 
 <script src="/vue.global.prod.js"></script>
+<script src="/xlsx.full.min.js"></script>
 
 <script>
 
@@ -560,6 +574,8 @@ const app = createApp({
     const selectedCategoryIds = ref([]);
     const selectedProductIds = ref([]);
     const selectedUserIds = ref([]);
+    const productImportInput = ref(null);
+    const importingProducts = ref(false);
 
     const categoryModal = reactive({ show: false, isEdit: false, data: { name: '' } });
     const productModal = reactive({ show: false, isEdit: false, data: { name: '', author: '', category_id: '', stock: 0 } });
@@ -755,6 +771,220 @@ const app = createApp({
       return p ? p.name : '-';
     };
     const formatDate = (d) => { if (!d) return '-'; return new Date(d).toLocaleString('zh-CN'); };
+    const getExportTimestamp = () => {
+      const now = new Date();
+      const pad = value => String(value).padStart(2, '0');
+      return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    };
+    const exportExcel = (fileName, sheetName, headers, rows, columnWidths) => {
+      if (!rows.length) {
+        showToast('当前没有可导出的数据', 'info');
+        return;
+      }
+      if (typeof XLSX === 'undefined') {
+        showToast('Excel 组件加载失败，请刷新页面后重试', 'error');
+        return;
+      }
+      try {
+        const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+        worksheet['!cols'] = columnWidths.map(width => ({ wch: width }));
+        worksheet['!autofilter'] = { ref: worksheet['!ref'] };
+        const workbook = XLSX.utils.book_new();
+        workbook.Props = {
+          Title: sheetName,
+          Subject: sheetName,
+          Author: '图书管理系统',
+          CreatedDate: new Date()
+        };
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        XLSX.writeFile(workbook, `${fileName}_${getExportTimestamp()}.xlsx`, { compression: true });
+        showToast(`导出成功，共 ${rows.length} 条数据`, 'success');
+      } catch (e) {
+        showToast('导出失败: ' + e.message, 'error');
+      }
+    };
+    const exportProducts = () => {
+      const rows = filteredProducts.value.map(prod => [
+        String(prod.id ?? prod._id ?? ''),
+        String(prod.name || ''),
+        String(prod.author || ''),
+        getCategoryName(prod.category_id),
+        String(prod.code || ''),
+        prod.year || '',
+        Number(prod.stock) || 0,
+        prod.on_sale === false ? '已下架' : '已上架'
+      ]);
+      exportExcel(
+        '书籍数据',
+        '书籍管理',
+        ['ID', '书名', '作者', '分类', '图书编号', '出版年份', '库存', '状态'],
+        rows,
+        [16, 28, 20, 16, 16, 12, 10, 12]
+      );
+    };
+    const downloadProductTemplate = () => {
+      if (typeof XLSX === 'undefined') {
+        showToast('Excel 组件加载失败，请刷新页面后重试', 'error');
+        return;
+      }
+      const headers = ['书名*', '作者', '分类*', '图书编号', '出版年份', '库存*', '状态', '简介'];
+      const templateSheet = XLSX.utils.aoa_to_sheet([headers]);
+      templateSheet['!cols'] = [28, 20, 18, 18, 12, 10, 12, 48].map(width => ({ wch: width }));
+      templateSheet['!autofilter'] = { ref: 'A1:H1' };
+
+      const categoryRows = [['可用分类名称'], ...categories.value.map(category => [category.name])];
+      const categorySheet = XLSX.utils.aoa_to_sheet(categoryRows);
+      categorySheet['!cols'] = [{ wch: 28 }];
+
+      const instructionSheet = XLSX.utils.aoa_to_sheet([
+        ['字段', '填写要求'],
+        ['书名*', '必填，最多 200 个字符'],
+        ['作者', '选填，最多 100 个字符'],
+        ['分类*', '必填，必须与“可用分类”工作表中的名称完全一致'],
+        ['图书编号', '选填，不能与已有书籍或本次导入的其他书籍重复；需保留前导 0 时请设置为文本'],
+        ['出版年份', `选填，填写 1000 至 ${new Date().getFullYear() + 1} 之间的整数`],
+        ['库存*', '必填，填写 0 至 100000 之间的整数'],
+        ['状态', '选填，只能填写“已上架”或“已下架”；不填默认为已上架'],
+        ['简介', '选填，最多 2000 个字符'],
+        ['注意', '请在“书籍导入模板”的第二行开始填写数据，不要修改表头名称']
+      ]);
+      instructionSheet['!cols'] = [{ wch: 18 }, { wch: 90 }];
+
+      const workbook = XLSX.utils.book_new();
+      workbook.Props = {
+        Title: '书籍导入模板',
+        Subject: '书籍批量导入',
+        Author: '图书管理系统',
+        CreatedDate: new Date()
+      };
+      XLSX.utils.book_append_sheet(workbook, templateSheet, '书籍导入模板');
+      XLSX.utils.book_append_sheet(workbook, categorySheet, '可用分类');
+      XLSX.utils.book_append_sheet(workbook, instructionSheet, '填写说明');
+      XLSX.writeFile(workbook, `书籍导入模板_${getExportTimestamp()}.xlsx`, { compression: true });
+      showToast('模板下载成功', 'success');
+    };
+    const chooseProductImport = () => {
+      if (importingProducts.value) return;
+      productImportInput.value && productImportInput.value.click();
+    };
+    const parseProductImport = async file => {
+      if (typeof XLSX === 'undefined') throw new Error('Excel 组件加载失败，请刷新页面后重试');
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      if (!workbook.SheetNames.length) throw new Error('Excel 中没有可读取的工作表');
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
+      if (!rows.length) throw new Error('Excel 内容为空');
+
+      const expectedHeaders = ['书名*', '作者', '分类*', '图书编号', '出版年份', '库存*', '状态', '简介'];
+      const actualHeaders = rows[0].map(value => String(value).trim());
+      const invalidHeaders = expectedHeaders.filter((header, index) => actualHeaders[index] !== header);
+      if (invalidHeaders.length > 0) {
+        throw new Error('模板表头不正确，请重新下载最新模板填写');
+      }
+
+      const books = [];
+      const errors = [];
+      const availableCategories = new Set(categories.value.map(category => String(category.name || '').trim()));
+      const currentYear = new Date().getFullYear();
+      rows.slice(1).forEach((row, index) => {
+        const excelRow = index + 2;
+        if (row.every(value => String(value).trim() === '')) return;
+
+        const name = String(row[0] || '').trim();
+        const author = String(row[1] || '').trim();
+        const categoryName = String(row[2] || '').trim();
+        const code = String(row[3] || '').trim();
+        const yearText = String(row[4] || '').trim();
+        const stockText = String(row[5] || '').trim();
+        const status = String(row[6] || '').trim();
+        const description = String(row[7] || '').trim();
+        const year = yearText === '' ? null : Number(yearText);
+        const stock = Number(stockText);
+
+        if (!name) errors.push(`第 ${excelRow} 行：书名不能为空`);
+        if (!categoryName) {
+          errors.push(`第 ${excelRow} 行：分类不能为空`);
+        } else if (!availableCategories.has(categoryName)) {
+          errors.push(`第 ${excelRow} 行：分类“${categoryName}”不存在`);
+        }
+        if (stockText === '' || !Number.isInteger(stock) || stock < 0 || stock > 100000) {
+          errors.push(`第 ${excelRow} 行：库存必须是 0 至 100000 的整数`);
+        }
+        if (year !== null && (!Number.isInteger(year) || year < 1000 || year > currentYear + 1)) {
+          errors.push(`第 ${excelRow} 行：出版年份格式不正确`);
+        }
+        if (status && status !== '已上架' && status !== '已下架') {
+          errors.push(`第 ${excelRow} 行：状态只能填写“已上架”或“已下架”`);
+        }
+        books.push({
+          row: excelRow,
+          name,
+          author,
+          category_name: categoryName,
+          code,
+          year,
+          stock,
+          on_sale: status !== '已下架',
+          description
+        });
+      });
+
+      if (errors.length > 0) {
+        const detail = errors.slice(0, 10).join('；');
+        const suffix = errors.length > 10 ? `；另有 ${errors.length - 10} 处错误` : '';
+        throw new Error(detail + suffix);
+      }
+      if (!books.length) throw new Error('模板中没有可导入的书籍数据');
+      if (books.length > 500) throw new Error('单次最多导入 500 本书籍');
+      return books;
+    };
+    const importProductsFromExcel = async event => {
+      const input = event.target;
+      const file = input.files && input.files[0];
+      if (!file) return;
+      importingProducts.value = true;
+      try {
+        const books = await parseProductImport(file);
+        if (!confirm(`检测到 ${books.length} 本书籍，确定导入到书籍列表吗？`)) return;
+        const result = await apiFetch('/products/import', {
+          method: 'POST',
+          body: JSON.stringify({ books })
+        });
+        await loadProducts();
+        showToast(`导入成功，共 ${result.imported} 本书籍`, 'success');
+      } catch (e) {
+        showToast(e.message || '导入失败', 'error');
+      } finally {
+        importingProducts.value = false;
+        input.value = '';
+      }
+    };
+    const exportBorrows = () => {
+      const statusText = { borrowed: '借阅中', returned: '已归还', overdue: '已逾期' };
+      const rows = filteredBorrows.value.map(rec => {
+        const product = products.value.find(
+          item => String(item.id) === String(rec.product_id) || String(item._id) === String(rec.product_id)
+        );
+        return [
+          String(rec._id || rec.id || ''),
+          String(rec.product_id || ''),
+          String(rec.product_name || (product && product.name) || ''),
+          String(rec.product_author || (product && product.author) || ''),
+          String(rec.user_name || ''),
+          formatDate(rec.borrow_date),
+          formatDate(rec.due_date),
+          formatDate(rec.return_date),
+          statusText[rec.status] || String(rec.status || '')
+        ];
+      });
+      exportExcel(
+        '借阅记录',
+        '借阅记录',
+        ['记录ID', '书籍ID', '书名', '作者', '借阅人', '借阅时间', '应还时间', '归还时间', '状态'],
+        rows,
+        [28, 18, 28, 20, 18, 22, 22, 22, 12]
+      );
+    };
 
     const openCategoryModal = (cat = null) => {
       categoryModal.isEdit = !!cat;
@@ -975,6 +1205,7 @@ const app = createApp({
       categorySearch, productSearch, productFilterCategory,
       borrowSearch, borrowFilterStatus, userSearch,
       selectedCategoryIds, selectedProductIds, selectedUserIds,
+      productImportInput, importingProducts,
       filteredCategories, filteredProducts, filteredBorrows, filteredUsers,
       categoryModal, productModal, borrowModal, userModal,
       handleLogin, handleRegister, handleLogout, switchToRegister, switchToLogin,
@@ -982,6 +1213,8 @@ const app = createApp({
       openProductModal, saveProduct, deleteProduct, toggleAllProducts, batchDeleteProducts,
       openBorrowModal, selectBorrowProduct, saveBorrow, returnBook,
       openUserModal, saveUser, deleteUser, toggleAllUsers, batchDeleteUsers,
+      downloadProductTemplate, chooseProductImport, importProductsFromExcel,
+      exportProducts, exportBorrows,
       getProductCount, getCategoryName, getProductName, formatDate
     };
   }

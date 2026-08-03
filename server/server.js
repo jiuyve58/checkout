@@ -37,6 +37,9 @@ app.get(['/', '/admin.html'], (req, res) => {
 app.get('/vue.global.prod.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'vue.global.prod.js'));
 });
+app.get('/xlsx.full.min.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'xlsx.full.min.js'));
+});
 
 app.get('/health', (req, res) => {
   res.json({ code: 0, status: 'ok', time: new Date().toISOString() });
@@ -953,6 +956,121 @@ app.post('/api/products', async (req, res) => {
   } catch (err) {
     console.error('创建图书失败:', err);
     res.status(500).json({ code: 500, message: err.message });
+  }
+});
+
+app.post('/api/products/import', async (req, res) => {
+  try {
+    const { books } = req.body;
+    if (!Array.isArray(books) || books.length === 0) {
+      return res.status(400).json({ code: 400, message: '没有可导入的书籍数据' });
+    }
+    if (books.length > 500) {
+      return res.status(400).json({ code: 400, message: '单次最多导入 500 本书籍' });
+    }
+
+    const [categories, existingBooks] = await Promise.all([
+      query(COLLECTIONS.CATEGORIES),
+      query(COLLECTIONS.BOOKS)
+    ]);
+    const categoryMap = new Map(
+      categories.map(category => [String(category.name || '').trim().toLowerCase(), category])
+    );
+    const existingCodes = new Set(
+      existingBooks
+        .map(book => String(book.code || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const importedCodes = new Set();
+    const validatedBooks = [];
+    const errors = [];
+    const currentYear = new Date().getFullYear();
+
+    books.forEach((book, index) => {
+      const item = book && typeof book === 'object' ? book : {};
+      const row = Number(item.row) || index + 2;
+      const rowErrors = [];
+      const name = String(item.name || '').trim();
+      const author = String(item.author || '').trim();
+      const categoryName = String(item.category_name || '').trim();
+      const code = String(item.code || '').trim();
+      const description = String(item.description || '').trim();
+      const category = categoryMap.get(categoryName.toLowerCase());
+      const stockMissing = item.stock === '' || item.stock === null || item.stock === undefined;
+      const stock = Number(item.stock);
+      const year = item.year === '' || item.year === null || item.year === undefined
+        ? null
+        : Number(item.year);
+
+      if (!name) rowErrors.push(`第 ${row} 行：书名不能为空`);
+      if (name.length > 200) rowErrors.push(`第 ${row} 行：书名不能超过 200 个字符`);
+      if (author.length > 100) rowErrors.push(`第 ${row} 行：作者不能超过 100 个字符`);
+      if (!categoryName) {
+        rowErrors.push(`第 ${row} 行：分类不能为空`);
+      } else if (!category) {
+        rowErrors.push(`第 ${row} 行：分类“${categoryName}”不存在`);
+      }
+      if (stockMissing || !Number.isInteger(stock) || stock < 0 || stock > 100000) {
+        rowErrors.push(`第 ${row} 行：库存必须是 0 至 100000 的整数`);
+      }
+      if (year !== null && (!Number.isInteger(year) || year < 1000 || year > currentYear + 1)) {
+        rowErrors.push(`第 ${row} 行：出版年份格式不正确`);
+      }
+      if (code.length > 100) rowErrors.push(`第 ${row} 行：图书编号不能超过 100 个字符`);
+      if (description.length > 2000) rowErrors.push(`第 ${row} 行：简介不能超过 2000 个字符`);
+
+      const normalizedCode = code.toLowerCase();
+      if (normalizedCode && (existingCodes.has(normalizedCode) || importedCodes.has(normalizedCode))) {
+        rowErrors.push(`第 ${row} 行：图书编号“${code}”已存在`);
+      }
+      if (normalizedCode) importedCodes.add(normalizedCode);
+
+      if (rowErrors.length === 0) {
+        const categoryId = Number(category.id);
+        validatedBooks.push({
+          import_row: row,
+          name,
+          author,
+          category_id: Number.isNaN(categoryId) ? String(category._id) : categoryId,
+          category_name: category.name,
+          code,
+          year,
+          stock,
+          on_sale: item.on_sale !== false,
+          description,
+          price: null,
+          image: '',
+          rating: 0,
+          sort: 0
+        });
+      }
+      errors.push(...rowErrors);
+    });
+
+    if (errors.length > 0) {
+      const detail = errors.slice(0, 10).join('；');
+      const suffix = errors.length > 10 ? `；另有 ${errors.length - 10} 处错误` : '';
+      return res.status(400).json({ code: 400, message: detail + suffix });
+    }
+
+    let imported = 0;
+    for (const book of validatedBooks) {
+      const { import_row: importRow, ...bookData } = book;
+      try {
+        await create(COLLECTIONS.BOOKS, bookData);
+        imported++;
+      } catch (err) {
+        console.error(`导入第 ${importRow} 行书籍失败:`, err);
+        return res.status(500).json({
+          code: 500,
+          message: `已成功导入 ${imported} 本，第 ${importRow} 行写入失败：${err.message}`
+        });
+      }
+    }
+    res.json({ code: 0, message: '导入成功', data: { imported } });
+  } catch (err) {
+    console.error('批量导入书籍失败:', err);
+    res.status(500).json({ code: 500, message: '导入失败：' + err.message });
   }
 });
 
