@@ -30,6 +30,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
 .btn-sm{padding:6px 14px;font-size:12px}
 .btn-block{width:100%}
 .login-error{background:#fef0f0;color:#f56c6c;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px}
+.auth-actions{display:flex;flex-direction:column;gap:12px}
 .admin-layout{display:flex;min-height:100vh}
 .sidebar{width:240px;background:linear-gradient(180deg,#2c3e50 0%,#34495e 100%);color:#fff;display:flex;flex-direction:column;flex-shrink:0}
 .sidebar .logo{padding:24px 20px;border-bottom:1px solid rgba(255,255,255,0.1)}
@@ -113,9 +114,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
 <div v-if="!auth.isLoggedIn" class="login-page">
   <div class="login-card">
     <h2>图书管理后台</h2>
-    <p class="subtitle">请登录以继续</p>
+    <p class="subtitle">{{ loginMode === 'login' ? '请登录以继续' : '注册管理员账号' }}</p>
     <div v-if="loginError" class="login-error">{{ loginError }}</div>
-    <form @submit.prevent="handleLogin">
+
+    <!-- 登录表单 -->
+    <form v-if="loginMode === 'login'" @submit.prevent="handleLogin">
       <div class="form-group">
         <label>用户名</label>
         <input type="text" v-model="loginForm.username" placeholder="请输入用户名" autocomplete="username">
@@ -124,9 +127,42 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
         <label>密码</label>
         <input type="password" v-model="loginForm.password" placeholder="请输入密码" autocomplete="current-password">
       </div>
-      <button type="submit" class="btn btn-primary" :disabled="loginLoading">
-        {{ loginLoading ? '登录中...' : '登 录' }}
-      </button>
+      <div class="auth-actions">
+        <button type="submit" class="btn btn-primary" :disabled="loginLoading">
+          {{ loginLoading ? '登录中...' : '登 录' }}
+        </button>
+        <button type="button" class="btn btn-primary" :disabled="loginLoading" @click="switchToRegister">
+          注 册
+        </button>
+      </div>
+    </form>
+
+    <!-- 注册表单 -->
+    <form v-else @submit.prevent="handleRegister">
+      <div class="form-group">
+        <label>用户名</label>
+        <input type="text" v-model="registerForm.username" placeholder="至少3位字符" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>昵称</label>
+        <input type="text" v-model="registerForm.nickname" placeholder="选填，显示名称">
+      </div>
+      <div class="form-group">
+        <label>密码</label>
+        <input type="password" v-model="registerForm.password" placeholder="至少8位字符" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>确认密码</label>
+        <input type="password" v-model="registerForm.confirmPassword" placeholder="再次输入密码" autocomplete="new-password">
+      </div>
+      <div class="auth-actions">
+        <button type="submit" class="btn btn-primary" :disabled="registerLoading">
+          {{ registerLoading ? '注册中...' : '注 册' }}
+        </button>
+        <button type="button" class="btn btn-secondary btn-block" :disabled="registerLoading" @click="switchToLogin">
+          返回登录
+        </button>
+      </div>
     </form>
   </div>
 </div>
@@ -494,9 +530,12 @@ const apiFetch = async (url, options = {}) => {
 
 const app = createApp({
   setup() {
+    const loginMode = ref('login');
     const loginForm = reactive({ username: '', password: '' });
+    const registerForm = reactive({ username: '', nickname: '', password: '', confirmPassword: '' });
     const loginError = ref('');
     const loginLoading = ref(false);
+    const registerLoading = ref(false);
     const currentPage = ref('categories');
     const toast = reactive({ show: false, message: '', type: 'success' });
 
@@ -596,16 +635,80 @@ const app = createApp({
       }
     };
 
-    const handleLogout = () => {
-      localStorage.removeItem('admin_token');
-      localStorage.removeItem('admin_user');
-      auth.token = '';
-      auth.user = null;
-      auth.isLoggedIn = false;
-      loginForm.username = '';
-      loginForm.password = '';
-      currentPage.value = 'categories';
-      showToast('已退出登录', 'info');
+    const handleLogout = async () => {
+      try {
+        if (auth.token) {
+          await apiFetch('/logout', { method: 'POST' });
+        }
+      } catch (e) {
+        console.warn('服务端退出失败:', e.message);
+      } finally {
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_user');
+        auth.token = '';
+        auth.user = null;
+        auth.isLoggedIn = false;
+        loginForm.username = '';
+        loginForm.password = '';
+        currentPage.value = 'categories';
+        showToast('已退出登录', 'info');
+      }
+    };
+
+    const switchToRegister = () => {
+      loginError.value = '';
+      registerForm.username = '';
+      registerForm.nickname = '';
+      registerForm.password = '';
+      registerForm.confirmPassword = '';
+      loginMode.value = 'register';
+    };
+
+    const switchToLogin = () => {
+      loginError.value = '';
+      loginMode.value = 'login';
+    };
+
+    const handleRegister = async () => {
+      loginError.value = '';
+      if (!registerForm.username || !registerForm.password) {
+        loginError.value = '请填写完整信息';
+        return;
+      }
+      if (registerForm.username.length < 3) {
+        loginError.value = '用户名至少3位';
+        return;
+      }
+      if (registerForm.password.length < 8) {
+        loginError.value = '密码至少8位';
+        return;
+      }
+      if (registerForm.password !== registerForm.confirmPassword) {
+        loginError.value = '两次密码不一致';
+        return;
+      }
+      registerLoading.value = true;
+      try {
+        const data = await apiFetch('/admin-register', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: registerForm.username,
+            password: registerForm.password,
+            nickname: registerForm.nickname
+          })
+        });
+        auth.token = data.token;
+        auth.user = data.user;
+        auth.isLoggedIn = true;
+        localStorage.setItem('admin_token', data.token);
+        localStorage.setItem('admin_user', JSON.stringify(data.user));
+        showToast('注册成功', 'success');
+        setTimeout(() => { loadCategories(); loadProducts(); loadBorrows(); loadUsers(); }, 100);
+      } catch (e) {
+        loginError.value = e.message || '注册失败';
+      } finally {
+        registerLoading.value = false;
+      }
     };
 
     const loadCategories = async () => {
@@ -857,7 +960,7 @@ const app = createApp({
     });
 
     return {
-      auth, loginForm, loginError, loginLoading,
+      auth, loginMode, loginForm, registerForm, loginError, loginLoading, registerLoading,
       currentPage, toast, pageTitle,
       categories, products, borrows, users,
       categorySearch, productSearch, productFilterCategory,
@@ -865,7 +968,7 @@ const app = createApp({
       selectedCategoryIds, selectedProductIds, selectedUserIds,
       filteredCategories, filteredProducts, filteredBorrows, filteredUsers,
       categoryModal, productModal, borrowModal, userModal,
-      handleLogin, handleLogout,
+      handleLogin, handleRegister, handleLogout, switchToRegister, switchToLogin,
       openCategoryModal, saveCategory, deleteCategory, toggleAllCategories, batchDeleteCategories,
       openProductModal, saveProduct, deleteProduct, toggleAllProducts, batchDeleteProducts,
       openBorrowModal, selectBorrowProduct, saveBorrow, returnBook,
