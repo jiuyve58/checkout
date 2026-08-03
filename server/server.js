@@ -300,8 +300,18 @@ app.post('/api/logout', authMiddleware, (req, res) => {
 });
 
 const PUBLIC_PATHS = ['/health', '/api/test-db', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/'];
+function isPublicRequest(req) {
+  if (!req.path.startsWith('/api/')) return true;
+  if (PUBLIC_PATHS.includes(req.path)) return true;
+  return req.method === 'GET' && (
+    req.path === '/api/categories' ||
+    req.path === '/api/products' ||
+    /^\/api\/products\/[^/]+$/.test(req.path)
+  );
+}
+
 app.use((req, res, next) => {
-  if (PUBLIC_PATHS.includes(req.path) || !req.path.startsWith('/api/')) return next();
+  if (isPublicRequest(req)) return next();
   authMiddleware(req, res, next);
 });
 
