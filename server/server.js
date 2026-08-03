@@ -91,6 +91,25 @@ function generateUserId() {
   return 'u_' + timestamp + '_' + random;
 }
 
+function generateBookId() {
+  const timestamp = Date.now().toString(36);
+  const random = crypto.randomBytes(8).toString('hex');
+  return `B${timestamp}${random}`;
+}
+
+async function findById(collection, id) {
+  const stringId = String(id);
+  let item = await queryOne(collection, { _id: stringId });
+  if (!item) item = await queryOne(collection, { id: stringId });
+  if (!item) {
+    const numericId = Number(stringId);
+    if (Number.isFinite(numericId)) {
+      item = await queryOne(collection, { id: numericId });
+    }
+  }
+  return item;
+}
+
 const TOKEN_SECRET = process.env.TOKEN_SECRET || process.env.TENCENTCLOUD_SECRETKEY;
 if (!TOKEN_SECRET) {
   throw new Error('缺少 TOKEN_SECRET 或 TENCENTCLOUD_SECRETKEY 环境变量');
@@ -880,7 +899,7 @@ app.get('/api/products', async (req, res) => {
     }
     products = products.map(b => ({
       _id: b._id,
-      id: b.id,
+      id: b._id,
       name: b.name,
       description: b.description || '',
       price: b.price,
@@ -903,8 +922,7 @@ app.get('/api/products', async (req, res) => {
 app.get('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let product = await queryOne(COLLECTIONS.BOOKS, { _id: String(id) });
-    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
+    const product = await findById(COLLECTIONS.BOOKS, id);
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
     }
@@ -912,6 +930,7 @@ app.get('/api/products/:id', async (req, res) => {
       code: 0,
       data: {
         _id: product._id,
+        id: product._id,
         name: product.name,
         description: product.description || '',
         price: product.price,
@@ -936,7 +955,10 @@ app.post('/api/products', async (req, res) => {
     if (!name) {
       return res.status(400).json({ code: 400, message: '书名不能为空' });
     }
+    const productId = generateBookId();
     const newProduct = {
+      _id: productId,
+      id: productId,
       name,
       description: description || '',
       price,
@@ -951,8 +973,8 @@ app.post('/api/products', async (req, res) => {
       year: year || null,
       stock: stock
     };
-    const result = await create(COLLECTIONS.BOOKS, newProduct);
-    res.json({ code: 0, data: { _id: result._id, ...newProduct } });
+    await create(COLLECTIONS.BOOKS, newProduct);
+    res.json({ code: 0, data: newProduct });
   } catch (err) {
     console.error('创建图书失败:', err);
     res.status(500).json({ code: 500, message: err.message });
@@ -1008,6 +1030,19 @@ app.post('/api/products/import', async (req, res) => {
     });
     const importedCodeOwners = new Map();
     const validatedBooksByIdentity = new Map();
+    const usedBookIds = new Set();
+    existingBooks.forEach(book => {
+      if (book._id !== undefined && book._id !== null) usedBookIds.add(String(book._id));
+      if (book.id !== undefined && book.id !== null) usedBookIds.add(String(book.id));
+    });
+    const createUniqueBookId = () => {
+      let bookId;
+      do {
+        bookId = generateBookId();
+      } while (usedBookIds.has(bookId));
+      usedBookIds.add(bookId);
+      return bookId;
+    };
     const errors = [];
     const currentYear = new Date().getFullYear();
 
@@ -1072,9 +1107,12 @@ app.post('/api/products/import', async (req, res) => {
           }
         } else {
           const categoryId = Number(category.id);
+          const bookId = createUniqueBookId();
           validatedBooksByIdentity.set(identity, {
             identity,
             import_rows: [row],
+            _id: bookId,
+            id: bookId,
             name,
             author,
             category_id: Number.isNaN(categoryId) ? String(category._id) : categoryId,
@@ -1147,8 +1185,7 @@ app.post('/api/products/import', async (req, res) => {
 app.put('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let product = await queryOne(COLLECTIONS.BOOKS, { _id: String(id) });
-    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
+    const product = await findById(COLLECTIONS.BOOKS, id);
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
     }
@@ -1181,8 +1218,7 @@ app.put('/api/products/:id', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     const id = req.params.id;
-    let product = await queryOne(COLLECTIONS.BOOKS, { _id: String(id) });
-    if (!product) product = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
+    const product = await findById(COLLECTIONS.BOOKS, id);
     if (!product) return res.status(404).json({ code: 404, message: '商品不存在' });
     await remove(COLLECTIONS.BOOKS, product._id);
     res.json({ code: 0, message: '删除成功' });
@@ -1226,8 +1262,7 @@ app.post('/api/products/batch-delete', async (req, res) => {
     for (const id of ids) {
       try {
         let docId = id;
-        let p = await queryOne(COLLECTIONS.BOOKS, { _id: id });
-        if (!p) p = await queryOne(COLLECTIONS.BOOKS, { id: Number(id) });
+        const p = await findById(COLLECTIONS.BOOKS, id);
         if (p) docId = p._id;
         await remove(COLLECTIONS.BOOKS, docId);
         ok++;

@@ -283,7 +283,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
         <tbody>
           <tr v-for="prod in filteredProducts" :key="prod._id">
             <td class="checkbox-cell"><input type="checkbox" :value="prod._id" v-model="selectedProductIds"></td>
-            <td>{{ prod.id }}</td>
+            <td>{{ prod._id || prod.id }}</td>
             <td>{{ prod.name }}</td>
             <td>{{ prod.author }}</td>
             <td>{{ getCategoryName(prod.category_id) }}</td>
@@ -805,7 +805,7 @@ const app = createApp({
     };
     const exportProducts = () => {
       const rows = filteredProducts.value.map(prod => [
-        String(prod.id ?? prod._id ?? ''),
+        String(prod._id ?? prod.id ?? ''),
         String(prod.name || ''),
         String(prod.author || ''),
         getCategoryName(prod.category_id),
@@ -846,6 +846,7 @@ const app = createApp({
         ['库存*', '必填，填写 0 至 100000 之间的整数'],
         ['状态', '选填，只能填写“已上架”或“已下架”；不填默认为已上架'],
         ['简介', '选填，最多 2000 个字符'],
+        ['ID', '无需填写；仅当数据库中不存在同书名、作者和分类的书籍时，由系统自动生成唯一字母数字 ID'],
         ['合并规则', '书名、作者和分类相同时视为同一本书，导入时不会新增重复记录，只累加库存'],
         ['注意', '请在“书籍导入模板”的第二行开始填写数据，不要修改表头名称']
       ]);
