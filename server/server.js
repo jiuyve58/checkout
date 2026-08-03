@@ -976,13 +976,38 @@ app.post('/api/products/import', async (req, res) => {
     const categoryMap = new Map(
       categories.map(category => [String(category.name || '').trim().toLowerCase(), category])
     );
-    const existingCodes = new Set(
-      existingBooks
-        .map(book => String(book.code || '').trim().toLowerCase())
-        .filter(Boolean)
-    );
-    const importedCodes = new Set();
-    const validatedBooks = [];
+    const normalizeImportValue = value => String(value || '').trim().toLowerCase();
+    const getBookIdentity = (name, author, categoryName) => JSON.stringify([
+      normalizeImportValue(name),
+      normalizeImportValue(author),
+      normalizeImportValue(categoryName)
+    ]);
+    const categoryNamesById = new Map();
+    categories.forEach(category => {
+      if (category.id !== undefined && category.id !== null) {
+        categoryNamesById.set(String(category.id), category.name);
+      }
+      if (category._id !== undefined && category._id !== null) {
+        categoryNamesById.set(String(category._id), category.name);
+      }
+    });
+    const existingBooksByIdentity = new Map();
+    const existingCodeOwners = new Map();
+    existingBooks.forEach(book => {
+      const categoryName = categoryNamesById.get(String(book.category_id))
+        || book.category_name
+        || '';
+      const identity = getBookIdentity(book.name, book.author, categoryName);
+      if (!existingBooksByIdentity.has(identity)) {
+        existingBooksByIdentity.set(identity, book);
+      }
+      const code = normalizeImportValue(book.code);
+      if (code && !existingCodeOwners.has(code)) {
+        existingCodeOwners.set(code, identity);
+      }
+    });
+    const importedCodeOwners = new Map();
+    const validatedBooksByIdentity = new Map();
     const errors = [];
     const currentYear = new Date().getFullYear();
 
@@ -1019,30 +1044,52 @@ app.post('/api/products/import', async (req, res) => {
       if (code.length > 100) rowErrors.push(`第 ${row} 行：图书编号不能超过 100 个字符`);
       if (description.length > 2000) rowErrors.push(`第 ${row} 行：简介不能超过 2000 个字符`);
 
+      const identity = getBookIdentity(name, author, category ? category.name : categoryName);
       const normalizedCode = code.toLowerCase();
-      if (normalizedCode && (existingCodes.has(normalizedCode) || importedCodes.has(normalizedCode))) {
+      const existingCodeOwner = existingCodeOwners.get(normalizedCode);
+      const importedCodeOwner = importedCodeOwners.get(normalizedCode);
+      if (
+        normalizedCode &&
+        ((existingCodeOwner && existingCodeOwner !== identity) ||
+          (importedCodeOwner && importedCodeOwner !== identity))
+      ) {
         rowErrors.push(`第 ${row} 行：图书编号“${code}”已存在`);
       }
-      if (normalizedCode) importedCodes.add(normalizedCode);
 
       if (rowErrors.length === 0) {
-        const categoryId = Number(category.id);
-        validatedBooks.push({
-          import_row: row,
-          name,
-          author,
-          category_id: Number.isNaN(categoryId) ? String(category._id) : categoryId,
-          category_name: category.name,
-          code,
-          year,
-          stock,
-          on_sale: item.on_sale !== false,
-          description,
-          price: null,
-          image: '',
-          rating: 0,
-          sort: 0
-        });
+        if (normalizedCode && !importedCodeOwner) {
+          importedCodeOwners.set(normalizedCode, identity);
+        }
+        const repeatedBook = validatedBooksByIdentity.get(identity);
+        if (repeatedBook) {
+          const mergedStock = repeatedBook.stock + stock;
+          if (mergedStock > 100000) {
+            rowErrors.push(`第 ${row} 行：合并后的库存不能超过 100000`);
+          } else {
+            repeatedBook.stock = mergedStock;
+            repeatedBook.import_rows.push(row);
+            if (!repeatedBook.code && code) repeatedBook.code = code;
+          }
+        } else {
+          const categoryId = Number(category.id);
+          validatedBooksByIdentity.set(identity, {
+            identity,
+            import_rows: [row],
+            name,
+            author,
+            category_id: Number.isNaN(categoryId) ? String(category._id) : categoryId,
+            category_name: category.name,
+            code,
+            year,
+            stock,
+            on_sale: item.on_sale !== false,
+            description,
+            price: null,
+            image: '',
+            rating: 0,
+            sort: 0
+          });
+        }
       }
       errors.push(...rowErrors);
     });
@@ -1053,21 +1100,44 @@ app.post('/api/products/import', async (req, res) => {
       return res.status(400).json({ code: 400, message: detail + suffix });
     }
 
+    const validatedBooks = Array.from(validatedBooksByIdentity.values());
     let imported = 0;
+    let merged = 0;
     for (const book of validatedBooks) {
-      const { import_row: importRow, ...bookData } = book;
+      const {
+        identity,
+        import_rows: importRows,
+        ...bookData
+      } = book;
+      const existingBook = existingBooksByIdentity.get(identity);
       try {
-        await create(COLLECTIONS.BOOKS, bookData);
-        imported++;
+        if (existingBook) {
+          const nextStock = (Number(existingBook.stock) || 0) + bookData.stock;
+          await update(COLLECTIONS.BOOKS, existingBook._id, { stock: nextStock });
+          merged++;
+        } else {
+          await create(COLLECTIONS.BOOKS, bookData);
+          imported++;
+        }
       } catch (err) {
-        console.error(`导入第 ${importRow} 行书籍失败:`, err);
+        const rowsText = importRows.join('、');
+        console.error(`导入第 ${rowsText} 行书籍失败:`, err);
         return res.status(500).json({
           code: 500,
-          message: `已成功导入 ${imported} 本，第 ${importRow} 行写入失败：${err.message}`
+          message: `已新增 ${imported} 本、合并 ${merged} 本，第 ${rowsText} 行写入失败：${err.message}`
         });
       }
     }
-    res.json({ code: 0, message: '导入成功', data: { imported } });
+    res.json({
+      code: 0,
+      message: '导入成功',
+      data: {
+        imported,
+        merged,
+        combinedRows: books.length - validatedBooks.length,
+        totalRows: books.length
+      }
+    });
   } catch (err) {
     console.error('批量导入书籍失败:', err);
     res.status(500).json({ code: 500, message: '导入失败：' + err.message });

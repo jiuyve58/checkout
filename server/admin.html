@@ -841,11 +841,12 @@ const app = createApp({
         ['书名*', '必填，最多 200 个字符'],
         ['作者', '选填，最多 100 个字符'],
         ['分类*', '必填，必须与“可用分类”工作表中的名称完全一致'],
-        ['图书编号', '选填，不能与已有书籍或本次导入的其他书籍重复；需保留前导 0 时请设置为文本'],
+        ['图书编号', '选填，不同书籍不能使用相同编号；需保留前导 0 时请设置为文本'],
         ['出版年份', `选填，填写 1000 至 ${new Date().getFullYear() + 1} 之间的整数`],
         ['库存*', '必填，填写 0 至 100000 之间的整数'],
         ['状态', '选填，只能填写“已上架”或“已下架”；不填默认为已上架'],
         ['简介', '选填，最多 2000 个字符'],
+        ['合并规则', '书名、作者和分类相同时视为同一本书，导入时不会新增重复记录，只累加库存'],
         ['注意', '请在“书籍导入模板”的第二行开始填写数据，不要修改表头名称']
       ]);
       instructionSheet['!cols'] = [{ wch: 18 }, { wch: 90 }];
@@ -951,7 +952,13 @@ const app = createApp({
           body: JSON.stringify({ books })
         });
         await loadProducts();
-        showToast(`导入成功，共 ${result.imported} 本书籍`, 'success');
+        const combinedText = result.combinedRows > 0
+          ? `，Excel 内合并 ${result.combinedRows} 条重复行`
+          : '';
+        showToast(
+          `导入成功：新增 ${result.imported} 本，库存合并 ${result.merged} 本${combinedText}`,
+          'success'
+        );
       } catch (e) {
         showToast(e.message || '导入失败', 'error');
       } finally {
