@@ -3,6 +3,11 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { runTransaction, uploadFile, downloadFile } = require('./db');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { Transform } = require('stream');
+const { pipeline } = require('stream/promises');
+const XLSX = require('./xlsx.full.min.js');
 const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromJson, seedDataFromLocal, waitForDb, initCloud, getLastInitError } = require('./db');
 const seedData = require('./seed-data');
 
@@ -104,6 +109,49 @@ function normalizeBookImages(images, legacyImage = '') {
   const fallback = String(legacyImage || '').trim();
   if (normalized.length === 0 && fallback) normalized.push(fallback);
   return [...new Set(normalized)].slice(0, 10);
+}
+
+function createRequestError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function normalizeArchivePath(value) {
+  const source = String(value || '').trim().replace(/\\/g, '/');
+  if (!source || source.includes('\0') || source.startsWith('/') || /^[a-zA-Z]:/.test(source)) {
+    throw createRequestError(`图片路径“${value}”不正确`);
+  }
+  const segments = source.split('/');
+  if (segments.includes('..')) {
+    throw createRequestError(`图片路径“${value}”不能包含上级目录`);
+  }
+  const normalized = segments.filter(segment => segment && segment !== '.').join('/');
+  if (!normalized || normalized.length > 300) {
+    throw createRequestError(`图片路径“${value}”不正确或过长`);
+  }
+  return normalized;
+}
+
+function normalizeImportImageFiles(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[|;；\r\n]+/);
+  const files = source
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .map(normalizeArchivePath);
+  const seen = new Set();
+  const normalized = files.filter(file => {
+    const key = file.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (normalized.length > 10) {
+    throw createRequestError('每本书最多导入 10 张图片');
+  }
+  return normalized;
 }
 
 async function findById(collection, id) {
@@ -1001,7 +1049,226 @@ app.post('/api/products', async (req, res) => {
   }
 });
 
-app.post('/api/products/import', async (req, res) => {
+const PRODUCT_IMPORT_HEADERS = [
+  '书名*',
+  '作者',
+  '分类*',
+  '图书编号',
+  '出版年份',
+  '库存*',
+  '状态',
+  '简介',
+  '图片文件'
+];
+
+function parseProductImportWorkbook(buffer) {
+  let workbook;
+  try {
+    workbook = XLSX.read(buffer, { type: 'buffer' });
+  } catch (err) {
+    throw createRequestError('压缩包中的 Excel 文件无法读取');
+  }
+  if (!workbook.SheetNames.length) {
+    throw createRequestError('Excel 中没有可读取的工作表');
+  }
+  const sheetName = workbook.SheetNames.includes('书籍导入模板')
+    ? '书籍导入模板'
+    : workbook.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    header: 1,
+    defval: '',
+    raw: false,
+    blankrows: false
+  });
+  if (!rows.length) {
+    throw createRequestError('Excel 内容为空');
+  }
+  const actualHeaders = rows[0].map(value => String(value).trim());
+  const invalidHeaders = PRODUCT_IMPORT_HEADERS.filter(
+    (header, index) => actualHeaders[index] !== header
+  );
+  if (invalidHeaders.length > 0) {
+    throw createRequestError('Excel 表头不正确，请重新下载最新模板填写');
+  }
+
+  const books = [];
+  rows.slice(1).forEach((row, index) => {
+    if (row.every(value => String(value).trim() === '')) return;
+    const status = String(row[6] || '').trim();
+    books.push({
+      row: index + 2,
+      name: String(row[0] || '').trim(),
+      author: String(row[1] || '').trim(),
+      category_name: String(row[2] || '').trim(),
+      code: String(row[3] || '').trim(),
+      year: String(row[4] || '').trim(),
+      stock: String(row[5] || '').trim(),
+      status,
+      on_sale: status !== '已下架',
+      description: String(row[7] || '').trim(),
+      image_files: String(row[8] || '').trim()
+    });
+  });
+  if (!books.length) {
+    throw createRequestError('模板中没有可导入的书籍数据');
+  }
+  if (books.length > 500) {
+    throw createRequestError('单次最多导入 500 本书籍');
+  }
+  return books;
+}
+
+function getArchiveEntrySize(entry) {
+  return Number(
+    (entry.vars && entry.vars.uncompressedSize)
+      || entry.uncompressedSize
+      || 0
+  );
+}
+
+async function readProductImportPackage(filePath) {
+  let unzipper;
+  try {
+    unzipper = require('unzipper');
+  } catch (err) {
+    throw createRequestError('服务器 ZIP 解析组件未安装', 500);
+  }
+
+  let directory;
+  try {
+    directory = await unzipper.Open.file(filePath);
+  } catch (err) {
+    throw createRequestError('ZIP 导入包无法读取或文件已损坏');
+  }
+  const fileEntries = directory.files.filter(entry => entry.type === 'File');
+  if (fileEntries.length > 5500) {
+    throw createRequestError('ZIP 内文件数量不能超过 5500 个');
+  }
+
+  const entriesByPath = new Map();
+  const workbookEntries = [];
+  let totalUncompressedSize = 0;
+  for (const entry of fileEntries) {
+    let archivePath;
+    try {
+      archivePath = normalizeArchivePath(entry.path);
+    } catch (err) {
+      throw createRequestError(`ZIP 包含不安全的文件路径：${entry.path}`);
+    }
+    if (
+      archivePath.startsWith('__MACOSX/')
+      || archivePath === '.DS_Store'
+      || archivePath.endsWith('/.DS_Store')
+    ) {
+      continue;
+    }
+    const entrySize = getArchiveEntrySize(entry);
+    if (!Number.isFinite(entrySize) || entrySize < 0) {
+      throw createRequestError(`ZIP 文件大小信息不正确：${archivePath}`);
+    }
+    totalUncompressedSize += entrySize;
+    if (totalUncompressedSize > 500 * 1024 * 1024) {
+      throw createRequestError('ZIP 解压后的文件总大小不能超过 500MB');
+    }
+    const key = archivePath.toLowerCase();
+    if (entriesByPath.has(key)) {
+      throw createRequestError(`ZIP 内存在重复文件路径：${archivePath}`);
+    }
+    entriesByPath.set(key, { entry, archivePath, entrySize });
+    const fileName = archivePath.split('/').pop();
+    if (
+      !fileName.startsWith('~$')
+      && /\.(xlsx|xls)$/i.test(fileName)
+    ) {
+      workbookEntries.push({ entry, archivePath, entrySize });
+    }
+  }
+  if (workbookEntries.length !== 1) {
+    throw createRequestError('ZIP 中必须且只能包含一个 Excel 模板文件');
+  }
+  const workbookEntry = workbookEntries[0];
+  if (workbookEntry.entrySize > 20 * 1024 * 1024) {
+    throw createRequestError('Excel 文件不能超过 20MB');
+  }
+  const workbookBuffer = await workbookEntry.entry.buffer();
+  const workbookDirectory = workbookEntry.archivePath.includes('/')
+    ? workbookEntry.archivePath.slice(0, workbookEntry.archivePath.lastIndexOf('/'))
+    : '';
+  return {
+    books: parseProductImportWorkbook(workbookBuffer),
+    entriesByPath,
+    workbookDirectory
+  };
+}
+
+function isValidImportedImage(buffer, extension) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return false;
+  if (extension === 'jpg' || extension === 'jpeg') {
+    return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+  if (extension === 'png') {
+    return buffer.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    );
+  }
+  if (extension === 'webp') {
+    return buffer.toString('ascii', 0, 4) === 'RIFF'
+      && buffer.toString('ascii', 8, 12) === 'WEBP';
+  }
+  return false;
+}
+
+async function uploadPackageImageFiles(imageFiles, entriesByPath, workbookDirectory) {
+  const uniqueFiles = [
+    ...new Map(imageFiles.map(imageFile => [imageFile.toLowerCase(), imageFile])).values()
+  ];
+  const uploads = new Map();
+  for (let index = 0; index < uniqueFiles.length; index += 4) {
+    const batch = uniqueFiles.slice(index, index + 4);
+    const results = await Promise.allSettled(batch.map(async imageFile => {
+      const normalizedPath = normalizeArchivePath(imageFile);
+      const relativePath = workbookDirectory
+        ? `${workbookDirectory}/${normalizedPath}`
+        : normalizedPath;
+      const packageFile = entriesByPath.get(normalizedPath.toLowerCase())
+        || entriesByPath.get(relativePath.toLowerCase());
+      if (!packageFile) {
+        throw createRequestError(`ZIP 中缺少图片文件：${normalizedPath}`);
+      }
+      const extension = normalizedPath.split('.').pop().toLowerCase();
+      if (!['jpg', 'jpeg', 'png', 'webp'].includes(extension)) {
+        throw createRequestError(`图片格式不支持：${normalizedPath}`);
+      }
+      if (packageFile.entrySize <= 0 || packageFile.entrySize > 5 * 1024 * 1024) {
+        throw createRequestError(`图片必须在 5MB 以内：${normalizedPath}`);
+      }
+      const imageBuffer = await packageFile.entry.buffer();
+      if (
+        imageBuffer.length > 5 * 1024 * 1024
+        || !isValidImportedImage(imageBuffer, extension)
+      ) {
+        throw createRequestError(`图片内容或格式不正确：${normalizedPath}`);
+      }
+      const cloudExtension = extension === 'jpeg' ? 'jpg' : extension;
+      const cloudPath = `covers/import_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${cloudExtension}`;
+      const fileID = await uploadFile(cloudPath, imageBuffer);
+      return {
+        key: normalizedPath.toLowerCase(),
+        url: `/storage?fileID=${encodeURIComponent(fileID)}`
+      };
+    }));
+    const failed = results.find(result => result.status === 'rejected');
+    results.forEach(result => {
+      if (result.status === 'fulfilled') {
+        uploads.set(result.value.key, result.value.url);
+      }
+    });
+    if (failed) throw failed.reason;
+  }
+  return uploads;
+}
+
+const importProductsHandler = async (req, res) => {
   try {
     const { books } = req.body;
     if (!Array.isArray(books) || books.length === 0) {
@@ -1075,6 +1342,14 @@ app.post('/api/products/import', async (req, res) => {
       const categoryName = String(item.category_name || '').trim();
       const code = String(item.code || '').trim();
       const description = String(item.description || '').trim();
+      const status = String(item.status || '').trim();
+      const images = normalizeBookImages(item.images, item.image);
+      let imageFiles = [];
+      try {
+        imageFiles = normalizeImportImageFiles(item.image_files);
+      } catch (err) {
+        rowErrors.push(`第 ${row} 行：${err.message}`);
+      }
       const category = categoryMap.get(categoryName.toLowerCase());
       const stockMissing = item.stock === '' || item.stock === null || item.stock === undefined;
       const stock = Number(item.stock);
@@ -1098,6 +1373,9 @@ app.post('/api/products/import', async (req, res) => {
       }
       if (code.length > 100) rowErrors.push(`第 ${row} 行：图书编号不能超过 100 个字符`);
       if (description.length > 2000) rowErrors.push(`第 ${row} 行：简介不能超过 2000 个字符`);
+      if (status && status !== '已上架' && status !== '已下架') {
+        rowErrors.push(`第 ${row} 行：状态只能填写“已上架”或“已下架”`);
+      }
 
       const identity = getBookIdentity(name, author, category ? category.name : categoryName);
       const normalizedCode = code.toLowerCase();
@@ -1118,12 +1396,24 @@ app.post('/api/products/import', async (req, res) => {
         const repeatedBook = validatedBooksByIdentity.get(identity);
         if (repeatedBook) {
           const mergedStock = repeatedBook.stock + stock;
+          let mergedImageFiles = null;
+          try {
+            mergedImageFiles = normalizeImportImageFiles([
+              ...repeatedBook.image_files,
+              ...imageFiles
+            ]);
+          } catch (err) {
+            rowErrors.push(`第 ${row} 行：${err.message}`);
+          }
           if (mergedStock > 100000) {
             rowErrors.push(`第 ${row} 行：合并后的库存不能超过 100000`);
-          } else {
+          } else if (mergedImageFiles) {
             repeatedBook.stock = mergedStock;
             repeatedBook.import_rows.push(row);
             if (!repeatedBook.code && code) repeatedBook.code = code;
+            repeatedBook.images = normalizeBookImages([...repeatedBook.images, ...images]);
+            repeatedBook.image = repeatedBook.images[0] || '';
+            repeatedBook.image_files = mergedImageFiles;
           }
         } else {
           const categoryId = Number(category.id);
@@ -1143,8 +1433,9 @@ app.post('/api/products/import', async (req, res) => {
             on_sale: item.on_sale !== false,
             description,
             price: null,
-            image: '',
-            images: [],
+            image: images[0] || '',
+            images,
+            image_files: imageFiles,
             rating: 0,
             sort: 0
           });
@@ -1160,19 +1451,43 @@ app.post('/api/products/import', async (req, res) => {
     }
 
     const validatedBooks = Array.from(validatedBooksByIdentity.values());
+    const stockOverflowErrors = validatedBooks.flatMap(book => {
+      const existingBook = existingBooksByIdentity.get(book.identity);
+      if (!existingBook || (Number(existingBook.stock) || 0) + book.stock <= 100000) {
+        return [];
+      }
+      return [`第 ${book.import_rows.join('、')} 行：与现有库存合并后不能超过 100000`];
+    });
+    if (stockOverflowErrors.length > 0) {
+      return res.status(400).json({ code: 400, message: stockOverflowErrors.join('；') });
+    }
+    let uploadedImages = 0;
+    if (typeof req.resolveImportImages === 'function') {
+      uploadedImages = await req.resolveImportImages(
+        validatedBooks,
+        existingBooksByIdentity
+      );
+    }
     let imported = 0;
     let merged = 0;
     for (const book of validatedBooks) {
       const {
         identity,
         import_rows: importRows,
+        image_files: _imageFiles,
         ...bookData
       } = book;
       const existingBook = existingBooksByIdentity.get(identity);
       try {
         if (existingBook) {
           const nextStock = (Number(existingBook.stock) || 0) + bookData.stock;
-          await update(COLLECTIONS.BOOKS, existingBook._id, { stock: nextStock });
+          const existingImages = normalizeBookImages(existingBook.images, existingBook.image);
+          const images = normalizeBookImages([...existingImages, ...bookData.images]);
+          await update(COLLECTIONS.BOOKS, existingBook._id, {
+            stock: nextStock,
+            image: images[0] || '',
+            images
+          });
           merged++;
         } else {
           await create(COLLECTIONS.BOOKS, bookData);
@@ -1194,14 +1509,114 @@ app.post('/api/products/import', async (req, res) => {
         imported,
         merged,
         combinedRows: books.length - validatedBooks.length,
-        totalRows: books.length
+        totalRows: books.length,
+        uploadedImages
       }
     });
   } catch (err) {
     console.error('批量导入书籍失败:', err);
-    res.status(500).json({ code: 500, message: '导入失败：' + err.message });
+    const statusCode = Number(err.statusCode) || 500;
+    res.status(statusCode).json({ code: statusCode, message: '导入失败：' + err.message });
   }
-});
+};
+
+app.post('/api/products/import', importProductsHandler);
+
+const PRODUCT_IMPORT_PACKAGE_LIMIT = 200 * 1024 * 1024;
+
+app.post(
+  '/api/products/import-package',
+  async (req, res, next) => {
+    const contentLength = Number(req.headers['content-length']) || 0;
+    if (contentLength > PRODUCT_IMPORT_PACKAGE_LIMIT) {
+      return res.status(413).json({ code: 413, message: 'ZIP 导入包不能超过 200MB' });
+    }
+    const tempPath = path.join(
+      os.tmpdir(),
+      `book_import_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.zip`
+    );
+    let receivedSize = 0;
+    const sizeLimiter = new Transform({
+      transform(chunk, encoding, callback) {
+        receivedSize += chunk.length;
+        if (receivedSize > PRODUCT_IMPORT_PACKAGE_LIMIT) {
+          return callback(createRequestError('ZIP 导入包不能超过 200MB', 413));
+        }
+        callback(null, chunk);
+      }
+    });
+    try {
+      await pipeline(req, sizeLimiter, fs.createWriteStream(tempPath, { flags: 'wx' }));
+      if (receivedSize === 0) {
+        throw createRequestError('请选择有效的 ZIP 导入包');
+      }
+      req.productImportPackagePath = tempPath;
+      next();
+    } catch (err) {
+      await fs.promises.unlink(tempPath).catch(() => {});
+      const statusCode = Number(err.statusCode) || 400;
+      res.status(statusCode).json({
+        code: statusCode,
+        message: err.message || 'ZIP 导入包读取失败'
+      });
+    }
+  },
+  async (req, res) => {
+    try {
+      const { books, entriesByPath, workbookDirectory } = await readProductImportPackage(
+        req.productImportPackagePath
+      );
+      req.body = { books };
+      req.resolveImportImages = async (validatedBooks, existingBooksByIdentity) => {
+        const imageOverflowErrors = validatedBooks.flatMap(book => {
+          const existingBook = existingBooksByIdentity.get(book.identity);
+          const existingImages = existingBook
+            ? normalizeBookImages(existingBook.images, existingBook.image)
+            : [];
+          if (existingImages.length + (book.image_files || []).length <= 10) {
+            return [];
+          }
+          return [`第 ${book.import_rows.join('、')} 行：与现有图片合并后不能超过 10 张`];
+        });
+        if (imageOverflowErrors.length > 0) {
+          throw createRequestError(imageOverflowErrors.join('；'));
+        }
+        const imageFiles = [
+          ...new Map(
+            validatedBooks
+              .flatMap(book => book.image_files || [])
+              .map(imageFile => [imageFile.toLowerCase(), imageFile])
+          ).values()
+        ];
+        if (!imageFiles.length) return 0;
+        const uploadedImages = await uploadPackageImageFiles(
+          imageFiles,
+          entriesByPath,
+          workbookDirectory
+        );
+        validatedBooks.forEach(book => {
+          const images = (book.image_files || [])
+            .map(imageFile => uploadedImages.get(imageFile.toLowerCase()))
+            .filter(Boolean);
+          book.images = normalizeBookImages([...book.images, ...images]);
+          book.image = book.images[0] || '';
+        });
+        return uploadedImages.size;
+      };
+      console.info(`[ProductImport] ZIP package accepted: ${books.length} rows`);
+      await importProductsHandler(req, res);
+    } catch (err) {
+      console.error('[ProductImport] ZIP package failed:', err);
+      const statusCode = Number(err.statusCode) || 500;
+      res.status(statusCode).json({
+        code: statusCode,
+        message: '导入失败：' + err.message
+      });
+    } finally {
+      await fs.promises.unlink(req.productImportPackagePath).catch(() => {});
+    }
+  }
+);
 
 app.put('/api/products/:id', async (req, res) => {
   try {

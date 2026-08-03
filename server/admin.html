@@ -259,14 +259,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
             <option value="">全部分类</option>
             <option v-for="cat in categories" :key="cat._id" :value="String(cat.id)">{{ cat.name }}</option>
           </select>
-          <button class="btn btn-secondary btn-sm" @click="downloadProductTemplate">下载模板</button>
+          <button class="btn btn-secondary btn-sm" @click="downloadProductTemplate">下载导入模板</button>
           <button class="btn btn-success btn-sm" @click="chooseProductImport" :disabled="importingProducts">
-            {{ importingProducts ? '正在导入...' : '导入 Excel' }}
+            {{ importingProducts ? '正在导入...' : '导入 Excel/ZIP' }}
           </button>
           <input
             ref="productImportInput"
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx,.xls,.zip,application/zip"
             style="display:none"
             @change="importProductsFromExcel"
           >
@@ -579,7 +579,16 @@ const apiFetch = async (url, options = {}) => {
     auth.isLoggedIn = false;
     throw new Error('登录已过期,请重新登录');
   }
-  const json = await res.json();
+  const responseText = await res.text();
+  let json;
+  try {
+    json = responseText ? JSON.parse(responseText) : {};
+  } catch (e) {
+    throw new Error(res.ok ? '服务器响应格式不正确' : `请求失败（HTTP ${res.status}）`);
+  }
+  if (!res.ok) {
+    throw new Error(json.message || `请求失败（HTTP ${res.status}）`);
+  }
   if (json.code !== 0 && json.code !== undefined) {
     throw new Error(json.message || '请求失败');
   }
@@ -867,10 +876,10 @@ const app = createApp({
         showToast('Excel 组件加载失败，请刷新页面后重试', 'error');
         return;
       }
-      const headers = ['书名*', '作者', '分类*', '图书编号', '出版年份', '库存*', '状态', '简介'];
+      const headers = ['书名*', '作者', '分类*', '图书编号', '出版年份', '库存*', '状态', '简介', '图片文件'];
       const templateSheet = XLSX.utils.aoa_to_sheet([headers]);
-      templateSheet['!cols'] = [28, 20, 18, 18, 12, 10, 12, 48].map(width => ({ wch: width }));
-      templateSheet['!autofilter'] = { ref: 'A1:H1' };
+      templateSheet['!cols'] = [28, 20, 18, 18, 12, 10, 12, 48, 60].map(width => ({ wch: width }));
+      templateSheet['!autofilter'] = { ref: 'A1:I1' };
 
       const categoryRows = [['可用分类名称'], ...categories.value.map(category => [category.name])];
       const categorySheet = XLSX.utils.aoa_to_sheet(categoryRows);
@@ -886,8 +895,12 @@ const app = createApp({
         ['库存*', '必填，填写 0 至 100000 之间的整数'],
         ['状态', '选填，只能填写“已上架”或“已下架”；不填默认为已上架'],
         ['简介', '选填，最多 2000 个字符'],
+        ['图片文件', '选填，填写 ZIP 内图片相对路径；多张图片使用 | 分隔，例如 images/book001-1.jpg|images/book001-2.jpg'],
+        ['图片限制', '每本最多 10 张；支持 JPG、PNG、WebP；单张不超过 5MB；第一张为封面'],
+        ['ZIP 结构', '将填写后的 Excel 和 images 图片文件夹一起压缩为 ZIP；ZIP 中只能包含一个 Excel 文件'],
+        ['导入方式', '无图片时可直接导入 Excel；需要导入图片时必须选择整个 ZIP 文件'],
         ['ID', '无需填写；仅当数据库中不存在同书名、作者和分类的书籍时，由系统自动生成唯一字母数字 ID'],
-        ['合并规则', '书名、作者和分类相同时视为同一本书，导入时不会新增重复记录，只累加库存'],
+        ['合并规则', '书名、作者和分类相同时视为同一本书；库存累加，图片去重追加，原封面保持第一张'],
         ['注意', '请在“书籍导入模板”的第二行开始填写数据，不要修改表头名称']
       ]);
       instructionSheet['!cols'] = [{ wch: 18 }, { wch: 90 }];
@@ -920,7 +933,10 @@ const app = createApp({
       const expectedHeaders = ['书名*', '作者', '分类*', '图书编号', '出版年份', '库存*', '状态', '简介'];
       const actualHeaders = rows[0].map(value => String(value).trim());
       const invalidHeaders = expectedHeaders.filter((header, index) => actualHeaders[index] !== header);
-      if (invalidHeaders.length > 0) {
+      if (
+        invalidHeaders.length > 0
+        || (actualHeaders[8] && actualHeaders[8] !== '图片文件')
+      ) {
         throw new Error('模板表头不正确，请重新下载最新模板填写');
       }
 
@@ -940,6 +956,7 @@ const app = createApp({
         const stockText = String(row[5] || '').trim();
         const status = String(row[6] || '').trim();
         const description = String(row[7] || '').trim();
+        const imageFiles = String(row[8] || '').trim();
         const year = yearText === '' ? null : Number(yearText);
         const stock = Number(stockText);
 
@@ -958,6 +975,9 @@ const app = createApp({
         if (status && status !== '已上架' && status !== '已下架') {
           errors.push(`第 ${excelRow} 行：状态只能填写“已上架”或“已下架”`);
         }
+        if (imageFiles) {
+          errors.push(`第 ${excelRow} 行：包含图片文件时，请将 Excel 和图片文件夹打包为 ZIP 后导入`);
+        }
         books.push({
           row: excelRow,
           name,
@@ -967,7 +987,8 @@ const app = createApp({
           year,
           stock,
           on_sale: status !== '已下架',
-          description
+          description,
+          image_files: []
         });
       });
 
@@ -986,18 +1007,35 @@ const app = createApp({
       if (!file) return;
       importingProducts.value = true;
       try {
-        const books = await parseProductImport(file);
-        if (!confirm(`检测到 ${books.length} 本书籍，确定导入到书籍列表吗？`)) return;
-        const result = await apiFetch('/products/import', {
-          method: 'POST',
-          body: JSON.stringify({ books })
-        });
+        const isZip = /\.zip$/i.test(file.name);
+        let result;
+        if (isZip) {
+          if (file.size > 200 * 1024 * 1024) {
+            throw new Error('ZIP 导入包不能超过 200MB');
+          }
+          if (!confirm('系统将读取 ZIP 中的 Excel 和图片并上传到云存储，确定开始导入吗？')) return;
+          result = await apiFetch('/products/import-package', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/zip' },
+            body: file
+          });
+        } else {
+          const books = await parseProductImport(file);
+          if (!confirm(`检测到 ${books.length} 本书籍，确定导入到书籍列表吗？`)) return;
+          result = await apiFetch('/products/import', {
+            method: 'POST',
+            body: JSON.stringify({ books })
+          });
+        }
         await loadProducts();
         const combinedText = result.combinedRows > 0
           ? `，Excel 内合并 ${result.combinedRows} 条重复行`
           : '';
+        const imageText = result.uploadedImages > 0
+          ? `，上传图片 ${result.uploadedImages} 张`
+          : '';
         showToast(
-          `导入成功：新增 ${result.imported} 本，库存合并 ${result.merged} 本${combinedText}`,
+          `导入成功：新增 ${result.imported} 本，库存合并 ${result.merged} 本${combinedText}${imageText}`,
           'success'
         );
       } catch (e) {
