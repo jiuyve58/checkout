@@ -61,6 +61,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
 .data-table .checkbox-cell{width:40px;text-align:center}
 .data-table .actions{display:flex;gap:8px}
 .data-table .empty-row td{text-align:center;color:#999;padding:40px}
+.book-cover-cell{width:56px;height:76px;border-radius:6px;overflow:hidden;background:#f0f2f5;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px}
+.book-cover-cell img{width:100%;height:100%;object-fit:cover;display:block}
+.book-cover-count{display:block;margin-top:4px;color:#909399;font-size:11px;text-align:center}
 .badge{display:inline-block;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500}
 .badge-success{background:#f0f9eb;color:#67c23a}
 .badge-warning{background:#fdf6ec;color:#e6a23c}
@@ -73,6 +76,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
 .modal .form-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:24px}
 .modal .form-row{display:flex;gap:16px}
 .modal .form-row .form-group{flex:1}
+.product-modal{max-width:680px}
+.image-upload-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.image-upload-tip{font-size:12px;color:#909399}
+.image-preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:12px}
+.image-preview-item{position:relative;height:132px;border:1px solid #ebeef5;border-radius:8px;overflow:hidden;background:#f5f7fa}
+.image-preview-item img{width:100%;height:100%;object-fit:cover;display:block}
+.image-preview-item .cover-tag{position:absolute;top:6px;left:6px;padding:3px 7px;border-radius:10px;background:#667eea;color:#fff;font-size:11px}
+.image-preview-item .remove-image{position:absolute;top:6px;right:6px;width:24px;height:24px;border:0;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;line-height:24px}
+.image-empty{padding:20px;border:1px dashed #dcdfe6;border-radius:8px;text-align:center;color:#909399;font-size:13px}
 .toast{position:fixed;top:24px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;color:#fff;font-size:14px;z-index:2000;animation:slideDown .3s ease}
 .toast-success{background:#67c23a}
 .toast-error{background:#f56c6c}
@@ -273,6 +285,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
           <tr>
             <th class="checkbox-cell"><input type="checkbox" :checked="selectedProductIds.length === filteredProducts.length && filteredProducts.length > 0" @change="toggleAllProducts"></th>
             <th>ID</th>
+            <th>图片</th>
             <th>书名</th>
             <th>作者</th>
             <th>分类</th>
@@ -284,6 +297,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
           <tr v-for="prod in filteredProducts" :key="prod._id">
             <td class="checkbox-cell"><input type="checkbox" :value="prod._id" v-model="selectedProductIds"></td>
             <td>{{ prod._id || prod.id }}</td>
+            <td>
+              <div class="book-cover-cell">
+                <img v-if="getProductCover(prod) && !prod._coverFailed" :src="getProductCover(prod)" :alt="prod.name" @error="prod._coverFailed=true">
+                <span v-else>无图</span>
+              </div>
+              <span v-if="getProductImages(prod).length > 1" class="book-cover-count">共 {{ getProductImages(prod).length }} 张</span>
+            </td>
             <td>{{ prod.name }}</td>
             <td>{{ prod.author }}</td>
             <td>{{ getCategoryName(prod.category_id) }}</td>
@@ -297,7 +317,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
               <button class="btn btn-danger btn-sm" @click="deleteProduct(prod._id)">删除</button>
             </td>
           </tr>
-          <tr v-if="filteredProducts.length === 0" class="empty-row"><td colspan="7">暂无书籍数据</td></tr>
+          <tr v-if="filteredProducts.length === 0" class="empty-row"><td colspan="8">暂无书籍数据</td></tr>
         </tbody>
       </table>
     </div>
@@ -413,7 +433,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
 
 <!-- 书籍弹窗 -->
 <div v-if="productModal.show" class="modal-overlay" @click.self="productModal.show=false">
-  <div class="modal">
+  <div class="modal product-modal">
     <h3>{{ productModal.isEdit ? '编辑书籍' : '新增书籍' }}</h3>
     <div class="form-group">
       <label>书名</label>
@@ -434,9 +454,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hira
       <label>库存</label>
       <input type="number" class="form-control" v-model.number="productModal.data.stock" min="0" placeholder="请输入库存数量">
     </div>
+    <div class="form-group">
+      <label>书籍图片</label>
+      <div class="image-upload-toolbar">
+        <button type="button" class="btn btn-secondary btn-sm" :disabled="uploadingProductImages || productModal.data.images.length >= 10" @click="chooseProductImages">
+          {{ uploadingProductImages ? '上传中...' : '选择图片' }}
+        </button>
+        <span class="image-upload-tip">支持 JPG、PNG、WebP，单张不超过 5MB，最多 10 张；第一张为封面</span>
+        <input ref="productImageInput" type="file" accept="image/jpeg,image/png,image/webp" multiple style="display:none" @change="uploadProductImages">
+      </div>
+      <div v-if="productModal.data.images.length" class="image-preview-grid">
+        <div v-for="(image, index) in productModal.data.images" :key="image + index" class="image-preview-item">
+          <img :src="resolveAdminImageUrl(image)" :alt="productModal.data.name">
+          <span v-if="index === 0" class="cover-tag">封面</span>
+          <button type="button" class="remove-image" title="删除图片" @click="removeProductImage(index)">×</button>
+        </div>
+      </div>
+      <div v-else class="image-empty">暂未上传图片</div>
+    </div>
     <div class="form-actions">
-      <button class="btn btn-secondary" @click="productModal.show=false">取消</button>
-      <button class="btn btn-primary" @click="saveProduct">保存</button>
+      <button class="btn btn-secondary" :disabled="uploadingProductImages" @click="productModal.show=false">取消</button>
+      <button class="btn btn-primary" :disabled="uploadingProductImages" @click="saveProduct">保存</button>
     </div>
   </div>
 </div>
@@ -576,9 +614,11 @@ const app = createApp({
     const selectedUserIds = ref([]);
     const productImportInput = ref(null);
     const importingProducts = ref(false);
+    const productImageInput = ref(null);
+    const uploadingProductImages = ref(false);
 
     const categoryModal = reactive({ show: false, isEdit: false, data: { name: '' } });
-    const productModal = reactive({ show: false, isEdit: false, data: { name: '', author: '', category_id: '', stock: 0 } });
+    const productModal = reactive({ show: false, isEdit: false, data: { name: '', author: '', category_id: '', stock: 0, image: '', images: [] } });
     const borrowModal = reactive({ show: false, data: { user_name: '', product_id: '' } });
     const userModal = reactive({ show: false, isEdit: false, data: { username: '', nickname: '', password: '', role: 'user', status: 'active' } });
 
@@ -1051,21 +1091,105 @@ const app = createApp({
 
     const openProductModal = (prod = null) => {
       productModal.isEdit = !!prod;
-      productModal.data = prod ? { ...prod } : { name: '', author: '', category_id: '', stock: 0 };
+      const images = prod ? getProductImages(prod) : [];
+      productModal.data = prod
+        ? { ...prod, image: images[0] || '', images }
+        : { name: '', author: '', category_id: '', stock: 0, image: '', images: [] };
       productModal.show = true;
+    };
+
+    const resolveAdminImageUrl = image => {
+      const value = String(image || '').trim();
+      if (!value) return '';
+      if (/^(https?:|data:|blob:)/.test(value) || value.startsWith('/')) return value;
+      return '/' + value;
+    };
+
+    const getProductImages = product => {
+      const source = Array.isArray(product && product.images) ? product.images : [];
+      const images = source.map(item => String(item || '').trim()).filter(Boolean);
+      const legacyImage = String(product && product.image || '').trim();
+      if (images.length === 0 && legacyImage) images.push(legacyImage);
+      return [...new Set(images)].slice(0, 10);
+    };
+
+    const getProductCover = product => {
+      const images = getProductImages(product);
+      return resolveAdminImageUrl(images[0] || '');
+    };
+
+    const chooseProductImages = () => {
+      if (productImageInput.value) productImageInput.value.click();
+    };
+
+    const readFileAsDataUrl = file => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('读取图片失败'));
+      reader.readAsDataURL(file);
+    });
+
+    const uploadProductImages = async event => {
+      const input = event.target;
+      const remaining = 10 - productModal.data.images.length;
+      const selectedFiles = Array.from(input.files || []);
+      input.value = '';
+      if (remaining <= 0 || selectedFiles.length === 0) return;
+      const files = selectedFiles.slice(0, remaining);
+      if (selectedFiles.length > remaining) {
+        showToast(`最多上传 10 张图片，本次仅处理前 ${remaining} 张`, 'info');
+      }
+      uploadingProductImages.value = true;
+      let uploaded = 0;
+      try {
+        for (const file of files) {
+          if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+            throw new Error(`${file.name} 格式不支持`);
+          }
+          if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
+            throw new Error(`${file.name} 大小必须在 5MB 以内`);
+          }
+          const image = await readFileAsDataUrl(file);
+          const result = await apiFetch('/upload', {
+            method: 'POST',
+            body: JSON.stringify({ image })
+          });
+          const url = result && (result.url || result.path);
+          if (!url) throw new Error(`${file.name} 上传结果无效`);
+          if (!productModal.data.images.includes(url)) {
+            productModal.data.images.push(url);
+            uploaded++;
+          }
+        }
+        productModal.data.image = productModal.data.images[0] || '';
+        showToast(`成功上传 ${uploaded} 张图片`, 'success');
+      } catch (e) {
+        productModal.data.image = productModal.data.images[0] || '';
+        showToast(e.message || '图片上传失败', 'error');
+      } finally {
+        uploadingProductImages.value = false;
+      }
+    };
+
+    const removeProductImage = index => {
+      productModal.data.images.splice(index, 1);
+      productModal.data.image = productModal.data.images[0] || '';
     };
 
     const saveProduct = async () => {
       if (!productModal.data.name) { showToast('请输入书名', 'error'); return; }
+      if (uploadingProductImages.value) { showToast('请等待图片上传完成', 'info'); return; }
+      const images = getProductImages(productModal.data);
+      const payload = { ...productModal.data, images, image: images[0] || '' };
       try {
         if (productModal.isEdit) {
           await apiFetch('/products/' + productModal.data._id, {
-            method: 'PUT', body: JSON.stringify(productModal.data)
+            method: 'PUT', body: JSON.stringify(payload)
           });
           showToast('更新成功', 'success');
         } else {
           await apiFetch('/products', {
-            method: 'POST', body: JSON.stringify(productModal.data)
+            method: 'POST', body: JSON.stringify(payload)
           });
           showToast('新增成功', 'success');
         }
@@ -1213,17 +1337,19 @@ const app = createApp({
       categorySearch, productSearch, productFilterCategory,
       borrowSearch, borrowFilterStatus, userSearch,
       selectedCategoryIds, selectedProductIds, selectedUserIds,
-      productImportInput, importingProducts,
+      productImportInput, importingProducts, productImageInput, uploadingProductImages,
       filteredCategories, filteredProducts, filteredBorrows, filteredUsers,
       categoryModal, productModal, borrowModal, userModal,
       handleLogin, handleRegister, handleLogout, switchToRegister, switchToLogin,
       openCategoryModal, saveCategory, deleteCategory, toggleAllCategories, batchDeleteCategories,
       openProductModal, saveProduct, deleteProduct, toggleAllProducts, batchDeleteProducts,
+      chooseProductImages, uploadProductImages, removeProductImage,
       openBorrowModal, selectBorrowProduct, saveBorrow, returnBook,
       openUserModal, saveUser, deleteUser, toggleAllUsers, batchDeleteUsers,
       downloadProductTemplate, chooseProductImport, importProductsFromExcel,
       exportProducts, exportBorrows,
-      getProductCount, getCategoryName, getProductName, formatDate
+      getProductCount, getCategoryName, getProductName, getProductImages, getProductCover,
+      resolveAdminImageUrl, formatDate
     };
   }
 });

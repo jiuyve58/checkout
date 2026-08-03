@@ -3,7 +3,6 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { runTransaction, uploadFile, downloadFile } = require('./db');
 const path = require('path');
-const fs = require('fs');
 const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromJson, seedDataFromLocal, waitForDb, initCloud, getLastInitError } = require('./db');
 const seedData = require('./seed-data');
 
@@ -95,6 +94,16 @@ function generateBookId() {
   const timestamp = Date.now().toString(36);
   const random = crypto.randomBytes(8).toString('hex');
   return `B${timestamp}${random}`;
+}
+
+function normalizeBookImages(images, legacyImage = '') {
+  const source = Array.isArray(images) ? images : [];
+  const normalized = source
+    .map(item => String(item || '').trim())
+    .filter(Boolean);
+  const fallback = String(legacyImage || '').trim();
+  if (normalized.length === 0 && fallback) normalized.push(fallback);
+  return [...new Set(normalized)].slice(0, 10);
 }
 
 async function findById(collection, id) {
@@ -897,21 +906,25 @@ app.get('/api/products', async (req, res) => {
         .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (a.sort || 0) - (b.sort || 0))
         .slice(0, 20);
     }
-    products = products.map(b => ({
-      _id: b._id,
-      id: b._id,
-      name: b.name,
-      description: b.description || '',
-      price: b.price,
-      image: b.image,
-      category_id: b.category_id ? String(b.category_id) : null,
-      on_sale: b.on_sale,
-      rating: b.rating || 0,
-      author: b.author || '',
-      code: b.code || '',
-      year: b.year || null,
-      stock: b.stock !== undefined ? b.stock : 5
-    }));
+    products = products.map(b => {
+      const images = normalizeBookImages(b.images, b.image);
+      return {
+        _id: b._id,
+        id: b._id,
+        name: b.name,
+        description: b.description || '',
+        price: b.price,
+        image: images[0] || '',
+        images,
+        category_id: b.category_id ? String(b.category_id) : null,
+        on_sale: b.on_sale,
+        rating: b.rating || 0,
+        author: b.author || '',
+        code: b.code || '',
+        year: b.year || null,
+        stock: b.stock !== undefined ? b.stock : 5
+      };
+    });
     res.json({ code: 0, data: products });
   } catch (err) {
     console.error('获取图书列表失败:', err);
@@ -926,6 +939,7 @@ app.get('/api/products/:id', async (req, res) => {
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
     }
+    const images = normalizeBookImages(product.images, product.image);
     res.json({
       code: 0,
       data: {
@@ -934,7 +948,8 @@ app.get('/api/products/:id', async (req, res) => {
         name: product.name,
         description: product.description || '',
         price: product.price,
-        image: product.image,
+        image: images[0] || '',
+        images,
         category_id: product.category_id ? String(product.category_id) : null,
         on_sale: product.on_sale,
         rating: product.rating || 0,
@@ -951,10 +966,14 @@ app.get('/api/products/:id', async (req, res) => {
 
 app.post('/api/products', async (req, res) => {
   try {
-    const { name, description, price, image, category_id, on_sale = true, rating = 0, sort = 0, author, code, year, stock = 1, category_name } = req.body;
+    const { name, description, price, image, images, category_id, on_sale = true, rating = 0, sort = 0, author, code, year, stock = 1, category_name } = req.body;
     if (!name) {
       return res.status(400).json({ code: 400, message: '书名不能为空' });
     }
+    if (images !== undefined && !Array.isArray(images)) {
+      return res.status(400).json({ code: 400, message: '书籍图片格式不正确' });
+    }
+    const normalizedImages = normalizeBookImages(images, image);
     const productId = generateBookId();
     const newProduct = {
       _id: productId,
@@ -962,7 +981,8 @@ app.post('/api/products', async (req, res) => {
       name,
       description: description || '',
       price,
-      image: image || '',
+      image: normalizedImages[0] || '',
+      images: normalizedImages,
       category_id: category_id !== undefined && category_id !== '' && category_id !== null ? Number(category_id) : null,
       category_name: category_name || '',
       on_sale,
@@ -1124,6 +1144,7 @@ app.post('/api/products/import', async (req, res) => {
             description,
             price: null,
             image: '',
+            images: [],
             rating: 0,
             sort: 0
           });
@@ -1189,12 +1210,22 @@ app.put('/api/products/:id', async (req, res) => {
     if (!product) {
       return res.status(404).json({ code: 404, message: '商品不存在' });
     }
-    const allowedFields = ['name', 'description', 'price', 'image', 'category_name', 'on_sale', 'rating', 'sort', 'author', 'code', 'year', 'stock'];
+    if (req.body.images !== undefined && !Array.isArray(req.body.images)) {
+      return res.status(400).json({ code: 400, message: '书籍图片格式不正确' });
+    }
+    const allowedFields = ['name', 'description', 'price', 'category_name', 'on_sale', 'rating', 'sort', 'author', 'code', 'year', 'stock'];
     const updateData = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
         updateData[field] = req.body[field];
       }
+    }
+    if (req.body.images !== undefined) {
+      updateData.images = normalizeBookImages(req.body.images);
+      updateData.image = updateData.images[0] || '';
+    } else if (req.body.image !== undefined) {
+      updateData.images = normalizeBookImages([], req.body.image);
+      updateData.image = updateData.images[0] || '';
     }
     if (req.body.category_id !== undefined) {
       const cid = req.body.category_id;
@@ -1342,7 +1373,7 @@ app.post('/api/borrow', async (req, res) => {
       product_name: product.name,
       product_author: product.author || '',
       product_code: product.code || '',
-      product_image: product.image || '',
+      product_image: normalizeBookImages(product.images, product.image)[0] || '',
       borrow_date: borrowDate.toISOString(),
       due_date: dueDate.toISOString(),
       return_date: null,
@@ -1406,7 +1437,7 @@ app.post('/api/borrow-legacy-disabled', async (req, res) => {
       user_name: user_name || '',
       product_id: productIdStr,
       product_name: product.name,
-      product_image: product.image || '',
+      product_image: normalizeBookImages(product.images, product.image)[0] || '',
       product_code: product.code || '',
       status: 'borrowed',
       borrow_date: borrowDate.toISOString(),
@@ -1582,32 +1613,6 @@ app.get('/api/menus', (req, res) => {
   });
 });
 
-app.post('/api/upload', (req, res) => {
-  try {
-    const { image } = req.body;
-    if (!image) {
-      return res.status(400).json({ code: 400, message: '缺少图片数据' });
-    }
-    const matches = image.match(/^data:(image\/\w+);base64,(.+)$/);
-    if (!matches) {
-      return res.status(400).json({ code: 400, message: '图片格式错误' });
-    }
-    const ext = matches[1].split('/')[1] || 'jpg';
-    const base64Data = matches[2];
-    const fileName = `cover_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const coversDir = path.join(__dirname, 'static', 'covers');
-    if (!fs.existsSync(coversDir)) {
-      fs.mkdirSync(coversDir, { recursive: true });
-    }
-    const filePath = path.join(coversDir, fileName);
-    fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-    const relativePath = `/static/covers/${fileName}`;
-    res.json({ code: 0, data: { path: relativePath } });
-  } catch (err) {
-    res.status(500).json({ code: 500, message: err.message });
-  }
-});
-
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
@@ -1641,11 +1646,13 @@ app.post('/api/import', async (req, res) => {
         }
       }
       for (const item of data.products) {
+        const images = normalizeBookImages(item.images, item.image);
         const itemData = {
           name: item.name,
           description: item.description || '',
           price: item.price,
-          image: item.image || '',
+          image: images[0] || '',
+          images,
           category_id: item.category_id || null,
           category_name: item.category_name || '',
           on_sale: item.on_sale,

@@ -122,13 +122,21 @@
 						this.allBooks = [];
 						return;
 					}
-					this.allBooks = list.map(b => ({
-						...b,
-						image: resolveImageUrl(b.image),
-						category_id: String(b.category_id || ''),
-						stock: Number(b.stock) || 0,
-						on_sale: b.on_sale !== false
-					}));
+                                  this.allBooks = list.map(b => {
+                                          const source = Array.isArray(b.images) ? b.images : [];
+                                          const rawImages = source.map(item => String(item || '').trim()).filter(Boolean);
+                                          if (rawImages.length === 0 && b.image) rawImages.push(b.image);
+                                          const images = [...new Set(rawImages.map(resolveImageUrl).filter(Boolean))];
+                                          const image = images[0] || '/static/book-placeholder-1.png';
+                                          return {
+                                                  ...b,
+                                                  images: images.length ? images : [image],
+                                                  image,
+                                                  category_id: String(b.category_id || ''),
+                                                  stock: Number(b.stock) || 0,
+                                                  on_sale: b.on_sale !== false
+                                          };
+                                  });
 				} catch (err) {
 					console.error('图书数据加载失败:', err);
 					this.allBooks = [];
@@ -167,6 +175,11 @@
 			onImageError(book) {
 				if (book.image !== '/static/book-placeholder-1.png') {
 					book.image = '/static/book-placeholder-1.png';
+                                  if (Array.isArray(book.images) && book.images.length) {
+                                          book.images.splice(0, 1, book.image);
+                                  } else {
+                                          book.images = [book.image];
+                                  }
 				}
 			}
 		}

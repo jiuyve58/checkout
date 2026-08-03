@@ -15,7 +15,17 @@
 				</view>
 			</view>
 			<view class="book-img-wrap">
-				<image class="book-img" :src="product.image" mode="aspectFill" @error="onProductImageError"></image>
+                          <swiper
+                                  class="book-swiper"
+                                  :circular="product.images.length > 1"
+                                  :indicator-dots="product.images.length > 1"
+                                  indicator-color="rgba(61, 40, 23, 0.25)"
+                                  indicator-active-color="#8B5A2B"
+                          >
+                                  <swiper-item v-for="(image, index) in product.images" :key="image + index" class="book-swiper-item">
+                                          <image class="book-img" :src="image" mode="aspectFill" @error="onProductImageError(index)"></image>
+                                  </swiper-item>
+                          </swiper>
 			</view>
 		</view>
 
@@ -161,6 +171,7 @@
 					author: '',
 					description: '',
 					image: '',
+                                  images: ['/static/book-placeholder-1.png'],
 					rating: 4.8,
 					code: 'A-0001',
 					year: '2020',
@@ -203,11 +214,13 @@
 			}
 			const coffeeData = uni.getStorageSync('currentCoffee');
 			if (coffeeData) {
+                          const images = this.resolveProductImages(coffeeData);
 				this.product = {
 					name: coffeeData.name || '',
 					author: coffeeData.author || '未知作者',
 					description: coffeeData.description || '暂无书籍简介',
-					image: resolveImageUrl(coffeeData.image) || '/static/book-placeholder-1.png',
+                                  image: images[0],
+                                  images,
 					rating: coffeeData.rating || 4.8,
 					_id: coffeeData._id,
 					code: coffeeData.code || 'A-0001',
@@ -218,12 +231,21 @@
 			this.updateCartTotal();
 		},
 		methods: {
+                  resolveProductImages(product) {
+                          const source = Array.isArray(product && product.images) ? product.images : [];
+                          const rawImages = source.map(item => String(item || '').trim()).filter(Boolean);
+                          if (rawImages.length === 0 && product && product.image) rawImages.push(product.image);
+                          const images = [...new Set(rawImages.map(resolveImageUrl).filter(Boolean))];
+                          return images.length ? images : ['/static/book-placeholder-1.png'];
+                  },
 			selectDuration(value) {
 				this.selectedDuration = value;
 			},
-			onProductImageError() {
-				if (this.product.image && !this.product.image.startsWith('/static/')) {
-					this.product.image = '/static/book-placeholder-1.png';
+                  onProductImageError(index) {
+                          const fallback = '/static/book-placeholder-1.png';
+                          if (this.product.images[index] !== fallback) {
+                                  this.product.images.splice(index, 1, fallback);
+                                  this.product.image = this.product.images[0] || fallback;
 					this.$forceUpdate();
 				}
 			},
@@ -289,12 +311,14 @@
 				productsObj.getDetail(id).then(res => {
 					const item = res && res.data ? res.data : (res && res._id ? res : null);
 					if (item) {
+                                          const images = this.resolveProductImages(item);
 						this.product = {
 							_id: item._id,
 							name: item.name || '',
 							author: item.author || '未知作者',
 							description: item.description || '暂无书籍简介',
-							image: resolveImageUrl(item.image) || '/static/book-placeholder-1.png',
+                                                  image: images[0],
+                                                  images,
 							rating: item.rating || 4.8,
 							code: item.code || 'A-0001',
 							year: item.year || '2020',
@@ -309,6 +333,7 @@
 						author: '未知作者',
 						description: '暂无书籍简介',
 						image: '/static/book-placeholder-1.png',
+                                          images: ['/static/book-placeholder-1.png'],
 						rating: 4.8,
 						code: 'A-0001',
 						year: '2020',
@@ -464,10 +489,19 @@
 	}
 
 	.book-img-wrap {
-		display: flex;
-		justify-content: center;
 		padding: 16px 0 0;
 	}
+
+  .book-swiper {
+          width: 100%;
+          height: 270px;
+  }
+
+  .book-swiper-item {
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+  }
 
 	.book-img {
 		width: 180px;
