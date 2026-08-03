@@ -427,34 +427,38 @@ app.get('/api/user/:id', async (req, res) => {
 
 app.put('/api/user/:id', async (req, res) => {
   try {
-    const id = req.params.id;
-    let user = await queryOne(COLLECTIONS.USERS, { _id: String(id) });
-    if (!user) user = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
+    if (String(req.params.id) !== String(req.userId)) {
+      return res.status(403).json({ code: 403, message: '无权修改其他用户' });
+    }
+    const user = await queryOne(COLLECTIONS.USERS, { _id: String(req.params.id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
     }
-    const { nickname, avatar, email, phone, status, role, password } = req.body;
+    const { username, nickname, avatar, email, phone } = req.body;
     const updateData = {};
-    if (nickname !== undefined) updateData.nickname = nickname;
+    if (username !== undefined) {
+      const normalizedUsername = String(username).trim();
+      if (normalizedUsername.length < 3 || normalizedUsername.length > 30) {
+        return res.status(400).json({ code: 400, message: '用户名需为3到30个字符' });
+      }
+      const existingUser = await queryOne(COLLECTIONS.USERS, { username: normalizedUsername });
+      if (existingUser && String(existingUser._id) !== String(user._id)) {
+        return res.status(409).json({ code: 409, message: '用户名已存在' });
+      }
+      updateData.username = normalizedUsername;
+    }
+    if (nickname !== undefined) updateData.nickname = String(nickname).trim();
     if (avatar !== undefined) updateData.avatar = avatar;
     if (email !== undefined) updateData.email = email;
     if (phone !== undefined) updateData.phone = phone;
-    if (role !== undefined) updateData.role = role;
-    if (status !== undefined) {
-      updateData.status = (status === 1 || status === '1' || status === true || status === 'active') ? 'active' :
-                          (status === 0 || status === '0' || status === false || status === 'disabled') ? 'disabled' : status;
-    }
-    if (password !== undefined && password) {
-      updateData.password = hashPassword(password);
-    }
     if (Object.keys(updateData).length > 0) {
       await update(COLLECTIONS.USERS, user._id, updateData);
     }
     const updatedUser = await queryOne(COLLECTIONS.USERS, { _id: user._id });
     res.json({ code: 0, data: sanitizeUser(updatedUser) });
   } catch (err) {
-    console.error('更新用户失败:', err);
-    res.status(500).json({ code: 500, message: err.message });
+    console.error('更新个人资料失败:', err);
+    res.status(500).json({ code: 500, message: '更新个人资料失败' });
   }
 });
 

@@ -125,6 +125,17 @@
 								<text class="menu-arrow">›</text>
 							</view>
 						</view>
+						<view class="menu-item" @click="goUsernameEdit">
+							<view class="menu-left">
+								<view class="menu-icon-wrap">
+									<text class="menu-icon">@</text>
+								</view>
+								<text class="menu-text">修改用户名</text>
+							</view>
+							<view class="menu-right">
+								<text class="menu-arrow">›</text>
+							</view>
+						</view>
 						<view class="menu-item" @click="handleLogout">
 							<view class="menu-left">
 								<view class="menu-icon-wrap logout-icon">
@@ -170,7 +181,7 @@
 
 <script>
 	import { borrowApi, resolveImageUrl } from '@/utils/coffee-api.js';
-	import { getCurrentUser, updateUserName, isLoggedIn, logout as doLogout } from '@/utils/user.js';
+	import { getCurrentUser, updateUserName, updateUserInfo, isLoggedIn, logout as doLogout } from '@/utils/user.js';
 
 	export default {
 		data() {
@@ -269,6 +280,32 @@
 						if (res.confirm && res.content) {
 							this.user = updateUserName(res.content);
 							uni.showToast({ title: '修改成功', icon: 'success' });
+						}
+					}
+				});
+			},
+			goUsernameEdit() {
+				uni.showModal({
+					title: '修改用户名',
+					content: this.user.username || '',
+					editable: true,
+					placeholderText: '请输入新用户名',
+					success: async (res) => {
+						if (!res.confirm) return;
+						const username = String(res.content || '').trim();
+						if (username.length < 3 || username.length > 30) {
+							uni.showToast({ title: '用户名需为3到30个字符', icon: 'none' });
+							return;
+						}
+						if (username === this.user.username) {
+							uni.showToast({ title: '用户名未修改', icon: 'none' });
+							return;
+						}
+						try {
+							this.user = await updateUserInfo(this.user.user_id, { username });
+							uni.showToast({ title: '修改成功', icon: 'success' });
+						} catch (err) {
+							uni.showToast({ title: err.message || '修改失败', icon: 'none' });
 						}
 					}
 				});

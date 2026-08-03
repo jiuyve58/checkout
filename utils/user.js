@@ -90,6 +90,7 @@ export async function updateUserInfo(userId, fields) {
 		const updated = {
 			...user,
 			user_name: res.data.nickname || user.user_name,
+			username: res.data.username || user.username,
 			avatar: res.data.avatar || user.avatar,
 			email: res.data.email || user.email,
 			phone: res.data.phone || user.phone
