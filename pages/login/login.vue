@@ -42,7 +42,7 @@
 					<view class="input-icon">
 						<text class="icon-text">✦</text>
 					</view>
-					<input class="form-input" :password="!showPwd" type="text" v-model="form.password" placeholder="请输入密码（至少6位）" placeholder-class="input-placeholder" />
+					<input class="form-input" :password="!showPwd" type="text" v-model="form.password" placeholder="请输入密码（至少8位）" placeholder-class="input-placeholder" />
 					<view class="toggle-pwd" @click="showPwd = !showPwd">
 						<text class="toggle-text">{{ showPwd ? '隐藏' : '显示' }}</text>
 					</view>
@@ -126,8 +126,8 @@
 					return;
 				}
 				if (!this.isLogin) {
-					if (this.form.password.length < 6) {
-						this.errorMsg = '密码至少6位';
+					if (this.form.password.length < 8) {
+						this.errorMsg = '密码至少8位';
 						return;
 					}
 					if (this.form.password !== this.form.confirmPassword) {

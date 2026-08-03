@@ -36,7 +36,7 @@
 					<text class="section-text">借阅中</text>
 				</view>
 				<view class="borrow-card" v-for="item in borrowingList" :key="item._id">
-					<image class="borrow-cover" :src="item.image" mode="aspectFill" @error="onImageError"></image>
+					<image class="borrow-cover" :src="item.image" mode="aspectFill" @error="onImageError(item)"></image>
 					<view class="borrow-info">
 						<text class="borrow-title">{{ item.name }}</text>
 						<text class="borrow-author">{{ item.author }}</text>
@@ -62,7 +62,7 @@
 					<text class="section-text">已预约</text>
 				</view>
 				<view class="borrow-card" v-for="item in reservedList" :key="item._id">
-					<image class="borrow-cover" :src="item.image" mode="aspectFill" @error="onImageError"></image>
+						<image class="borrow-cover" :src="item.image" mode="aspectFill" @error="onImageError(item)"></image>
 					<view class="borrow-info">
 						<text class="borrow-title">{{ item.name }}</text>
 						<text class="borrow-author">{{ item.author }}</text>
@@ -82,7 +82,7 @@
 					<view class="wish-list">
 						<view class="wish-item" v-for="(book, index) in wishList" :key="index">
 							<view class="wish-cover-wrap">
-								<image class="wish-cover" :src="book.image" mode="aspectFill" @error="onImageError"></image>
+								<image class="wish-cover" :src="book.image" mode="aspectFill" @error="onImageError(book)"></image>
 							</view>
 							<text class="wish-name">{{ book.name }}</text>
 						</view>
@@ -134,9 +134,6 @@
 				stats: { total: 0, borrowing: 0, returned: 0 }
 			};
 		},
-		onLoad() {
-			this.loadData();
-		},
 		onShow() {
 			this.loadData();
 		},
@@ -149,6 +146,9 @@
 					return;
 				}
 				this.currentUser = getCurrentUser();
+				this.borrowingList = [];
+				this.reservedList = [];
+				this.stats = { total: 0, borrowing: 0, returned: 0 };
 				try {
 					const res = await borrowApi.getRecords(this.currentUser.user_id);
 					const list = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
@@ -169,13 +169,13 @@
 					};
 				} catch (err) {
 					console.error('加载书架数据失败', err);
+					this.borrowingList = [];
 				}
-				this.wishList = [
-					{ name: '挪威的森林', image: '/static/book-placeholder-1.png' },
-					{ name: '百年孤独', image: '/static/book-placeholder-2.png' },
-					{ name: '白夜行', image: '/static/book-placeholder-3.png' },
-					{ name: '小王子', image: '/static/book-placeholder-4.png' }
-				];
+				const wishlist = uni.getStorageSync('wishlist');
+				this.wishList = (Array.isArray(wishlist) ? wishlist : []).map(book => ({
+					...book,
+					image: resolveImageUrl(book.image || '')
+				}));
 			},
 			formatDate(dateStr) {
 				if (!dateStr) return '';
@@ -225,8 +225,10 @@
 			goLogin() {
 				uni.navigateTo({ url: '/pages/login/login' });
 			},
-			onImageError(e) {
-				e.target.src = '/static/book-placeholder-1.png';
+			onImageError(item) {
+				if (item.image !== '/static/book-placeholder-1.png') {
+					item.image = '/static/book-placeholder-1.png';
+				}
 			}
 		}
 	}

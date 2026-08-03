@@ -10,9 +10,20 @@ export function setCart(cart) {
 
 export function addToCart(book, quantity = 1) {
 	const cart = getCart();
+	const currentStock = Number(book.stock);
+	if (Number.isFinite(currentStock) && currentStock <= 0) {
+		return cart;
+	}
 	const existingIndex = cart.findIndex(item => item._id === book._id);
 	if (existingIndex > -1) {
-		cart[existingIndex].quantity += quantity;
+		const stock = Number(book.stock);
+		const nextQuantity = cart[existingIndex].quantity + quantity;
+		cart[existingIndex].quantity = Number.isFinite(stock) && stock >= 0
+			? Math.min(nextQuantity, stock)
+			: nextQuantity;
+		if (Number.isFinite(stock)) {
+			cart[existingIndex].stock = stock;
+		}
 		if (book.borrowDays) {
 			cart[existingIndex].borrowDays = book.borrowDays;
 		}
@@ -24,7 +35,7 @@ export function addToCart(book, quantity = 1) {
 			code: book.code || '',
 			year: book.year || null,
 			image: book.image,
-			price: book.price || 14,
+			stock: Number.isFinite(Number(book.stock)) ? Number(book.stock) : null,
 			borrowDays: book.borrowDays || 14,
 			quantity: quantity
 		});
@@ -59,12 +70,10 @@ export function clearCart() {
 export function getCartTotal() {
 	const cart = getCart();
 	let totalCount = 0;
-	let totalPrice = 0;
 	cart.forEach(item => {
 		totalCount += item.quantity;
-		totalPrice += item.price * item.quantity;
 	});
-	return { totalCount, totalPrice };
+	return { totalCount };
 }
 
 export function removeFromCart(productId) {

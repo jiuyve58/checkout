@@ -60,8 +60,6 @@
 		"navigationBarTitleText": "书香借阅",
 		"navigationBarBackgroundColor": "#FFFFFF",
 		"backgroundColor": "#F8F8F8",
-		"enablePullDownRefresh": false,
-		"rpxCalcMaxDeviceWidth": 375,
-		"rpxCalcBaseDeviceWidth": 375
+		"enablePullDownRefresh": false
 	}
 }

@@ -1,5 +1,25 @@
 import config from '@/config/index.js';
 const API_BASE = config.API_BASE;
+const TOKEN_KEY = 'authToken';
+const USER_KEY = 'currentUser';
+
+function buildAuthHeader() {
+	try {
+		const token = uni.getStorageSync(TOKEN_KEY) || '';
+		return token ? { 'Authorization': 'Bearer ' + token } : {};
+	} catch (e) { return {}; }
+}
+
+function clearUserAuth() {
+	try { uni.removeStorageSync(TOKEN_KEY); } catch (e) {}
+	try { uni.removeStorageSync(USER_KEY); } catch (e) {}
+}
+
+function handleAuthError(statusCode, data) {
+	if (statusCode === 401) {
+		clearUserAuth();
+	}
+}
 
 export function resolveImageUrl(imagePath) {
 	if (!imagePath) return '';
@@ -37,65 +57,50 @@ export function getFallbackImage(book, index) {
 	return '/static/book-placeholder-' + ((index % 4) + 1) + '.png';
 }
 
-export function request(method, path, data) {
+export function request(method, path, data, options = {}) {
 	return new Promise((resolve, reject) => {
 		const handleSuccess = (res) => {
 			if (res.statusCode >= 200 && res.statusCode < 300) {
 				resolve(res.data);
 			} else {
+				handleAuthError(res.statusCode, res.data);
 				const msg = (res.data && res.data.message) ? res.data.message : ('请求失败: ' + res.statusCode);
-				reject(new Error(msg));
+                                const error = new Error(msg);
+                                error.statusCode = res.statusCode;
+                                reject(error);
 			}
 		};
 		const handleFail = (err) => {
 			console.error('请求失败:', err);
 			const code = err && (err.errCode || err.errno);
 			const detail = err && (err.errMsg || err.message);
+                  if (/timeout|超时/i.test(detail || '')) {
+                          const error = new Error(options.timeoutMessage || '请求超时，请稍后重试');
+                          error.code = 'REQUEST_TIMEOUT';
+                          reject(error);
+                          return;
+                  }
 			const message = [code, detail].filter(Boolean).join(' ');
-			reject(new Error(message || '网络请求失败，请检查云托管服务是否正常'));
+                  reject(new Error(options.networkErrorMessage || message || '网络请求失败，请检查云托管服务是否正常'));
 		};
 
+		const authHeader = buildAuthHeader();
+
 		const httpFallback = (reason) => {
-			console.warn('callContainer降级HTTP:', reason || '');
 			uni.request({
 				url: API_BASE + path,
 				method,
 				data,
-				timeout: 30000,
-				header: { 'Content-Type': 'application/json' },
+                          timeout: options.timeout || 30000,
+				header: { 'Content-Type': 'application/json', ...authHeader },
 				success: handleSuccess,
-				fail: handleFail
+				fail: (err) => {
+					handleFail(err);
+				}
 			});
 		};
 
-		// #ifdef MP-WEIXIN
-		if (wx.cloud && wx.cloud.callContainer) {
-			wx.cloud.callContainer({
-				config: {
-					env: config.CLOUD_ENV
-				},
-				path,
-				method,
-				data,
-				header: {
-					'X-WX-SERVICE': config.CLOUD_SERVICE,
-					'Content-Type': 'application/json'
-				},
-				success: handleSuccess,
-				fail: (err) => {
-					const code = err && (err.errCode || err.errno);
-					if (code === 102002 || /超时|timeout/i.test(err && err.errMsg || '')) {
-						httpFallback('请求超时');
-					} else {
-						handleFail(err);
-					}
-				}
-			});
-			return;
-		}
-		// #endif
-
-		httpFallback('不支持callContainer');
+		httpFallback('direct');
 	});
 }
 
@@ -151,7 +156,7 @@ export function importObject(name) {
 }
 
 export function resetData() {
-	return request('GET', '/reset');
+	return request('POST', '/api/reset-seed');
 }
 
 export const borrowApi = {

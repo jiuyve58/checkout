@@ -13,20 +13,9 @@
 			<view class="tab-item" :class="{ active: activeCategory === '' }" @click="switchCategory('')">
 				<text class="tab-text">全部</text>
 			</view>
-			<view class="tab-item" :class="{ active: activeCategory === '文学小说' }" @click="switchCategory('文学小说')">
-				<text class="tab-text">文学</text>
-			</view>
-			<view class="tab-item" :class="{ active: activeCategory === '悬疑推理' }" @click="switchCategory('悬疑推理')">
-				<text class="tab-text">推理</text>
-			</view>
-			<view class="tab-item" :class="{ active: activeCategory === '童话寓言' }" @click="switchCategory('童话寓言')">
-				<text class="tab-text">童话</text>
-			</view>
-			<view class="tab-item" :class="{ active: activeCategory === '散文杂文' }" @click="switchCategory('散文杂文')">
-				<text class="tab-text">杂文</text>
-			</view>
-			<view class="tab-item" :class="{ active: activeCategory === '历史传记' }" @click="switchCategory('历史传记')">
-				<text class="tab-text">历史</text>
+			<view class="tab-item" v-for="category in categories" :key="category._id"
+				:class="{ active: activeCategory === category._id }" @click="switchCategory(category._id)">
+				<text class="tab-text">{{ category.name }}</text>
 			</view>
 		</view>
 
@@ -38,7 +27,7 @@
 			<view class="grid-inner">
 				<view class="book-card" v-for="book in filteredBooks" :key="book._id" @click="goDetail(book)">
 					<view class="book-cover-wrap">
-						<image class="book-cover" :src="book.image" mode="aspectFill" @error="onImageError"></image>
+						<image class="book-cover" :src="book.image" mode="aspectFill" @error="onImageError(book)"></image>
 					</view>
 					<text class="book-name">{{ book.name }}</text>
 					<text class="book-author">{{ book.author }}</text>
@@ -80,7 +69,6 @@
 
 <script>
 	import { categoriesApi, productsApi, resolveImageUrl } from '@/utils/coffee-api.js';
-	import { getMockProducts, getMockCategories } from '@/utils/mock-data.js';
 	export default {
 		data() {
 			return {
@@ -94,7 +82,7 @@
 			filteredBooks() {
 				let list = this.allBooks;
 				if (this.activeCategory) {
-					list = list.filter(b => b.category_id === this.activeCategory);
+					list = list.filter(b => String(b.category_id) === this.activeCategory);
 				}
 				if (this.keyword.trim()) {
 					const kw = this.keyword.trim().toLowerCase();
@@ -116,9 +104,14 @@
 				try {
 					const res = await categoriesApi.getList();
 					const list = res && (res.data || res);
-					this.categories = Array.isArray(list) ? list : getMockCategories();
+					this.categories = (Array.isArray(list) ? list : []).map(category => ({
+						...category,
+						_id: String(category._id || category.id),
+						name: category.name || category.title || '未命名分类'
+					}));
 				} catch (err) {
-					this.categories = getMockCategories();
+					console.error('分类数据加载失败:', err);
+					this.categories = [];
 				}
 			},
 			async loadBooks() {
@@ -126,27 +119,21 @@
 					const res = await productsApi.getList();
 					const list = res && (res.data || (Array.isArray(res) ? res : []));
 					if (!Array.isArray(list) || list.length === 0) {
-						this.useMockData();
+						this.allBooks = [];
 						return;
 					}
 					this.allBooks = list.map(b => ({
 						...b,
 						image: resolveImageUrl(b.image),
-						category_id: b.category_id || '1',
+						category_id: String(b.category_id || ''),
+						stock: Number(b.stock) || 0,
 						on_sale: b.on_sale !== false
 					}));
 				} catch (err) {
-					this.useMockData();
+					console.error('图书数据加载失败:', err);
+					this.allBooks = [];
+					uni.showToast({ title: '图书数据加载失败', icon: 'none' });
 				}
-			},
-			useMockData() {
-				this.allBooks = getMockProducts().map(b => ({
-					...b,
-					image: resolveImageUrl(b.image),
-					category_id: b.category_id || '1',
-					on_sale: true
-				}));
-				this.categories = getMockCategories();
 			},
 			switchCategory(cat) {
 				this.activeCategory = cat;
@@ -154,12 +141,12 @@
 			onSearch() {},
 			getStatusClass(book) {
 				if (book.on_sale === false) return 'tag-reserved';
-				if (book._id === 'p3' || book._id === 'p8' || book._id === 'p6') return 'tag-borrowing';
+				if (book.stock <= 0) return 'tag-borrowing';
 				return 'tag-available';
 			},
 			getStatusText(book) {
 				if (book.on_sale === false) return '已预约';
-				if (book._id === 'p3' || book._id === 'p8' || book._id === 'p6') return '借阅中';
+				if (book.stock <= 0) return '暂无库存';
 				return '可借阅';
 			},
 			goDetail(book) {
@@ -177,8 +164,10 @@
 			goProfile() {
 				uni.redirectTo({ url: '/pages/wode/wode' });
 			},
-			onImageError(e) {
-				e.target.src = '/static/book-placeholder-1.png';
+			onImageError(book) {
+				if (book.image !== '/static/book-placeholder-1.png') {
+					book.image = '/static/book-placeholder-1.png';
+				}
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const { runTransaction, uploadFile, downloadFile } = require('./db');
 const path = require('path');
 const fs = require('fs');
 const { query, queryOne, create, update, remove, COLLECTIONS, cloudAvailable, importDataFromJson, seedDataFromLocal, waitForDb, initCloud, getLastInitError } = require('./db');
@@ -10,39 +11,45 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.set('trust proxy', true);
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+allowedOrigins.push(
+  process.env.PUBLIC_BASE_URL || 'https://checkout1-289516-10-1460535603.sh.run.tcloudbase.com',
+  'http://localhost:3000'
+);
 app.use(cors({
-  origin: function(origin, callback) {
-    callback(null, true);
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(null, false);
   },
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
 
-app.use(async (req, res, next) => {
-  if (!cloudAvailable()) {
-    await waitForDb(1200);
-  }
-  next();
+app.use('/static', express.static(path.join(__dirname, 'static')));
+app.get(['/', '/admin.html'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+app.get('/vue.global.prod.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'vue.global.prod.js'));
 });
 
-app.use(express.static(__dirname));
+app.get('/health', (req, res) => {
+  res.json({ code: 0, status: 'ok', time: new Date().toISOString() });
+});
 
-app.get('/health', async (req, res) => {
-  await waitForDb(3000);
+app.get('/health-internal-disabled', async (req, res) => {
+  return res.status(404).end();
   res.json({
     code: 0,
     status: 'ok',
     time: new Date().toISOString(),
     db_mode: cloudAvailable() ? 'cloud' : 'disconnected',
-    db_init_error: getLastInitError() || '',
-    cloud_env: process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff',
-    env_vars: {
-      TCB_ENV: process.env.TCB_ENV || '(not set)',
-      TENCENTCLOUD_SECRETID: process.env.TENCENTCLOUD_SECRETID ? 'set' : 'not set',
-      TENCENTCLOUD_SECRETKEY: process.env.TENCENTCLOUD_SECRETKEY ? 'set' : 'not set',
-      SCF_RUNTIME: process.env.SCF_RUNTIME || '(not scf)',
-      TENCENTCLOUD_RUNENV: process.env.TENCENTCLOUD_RUNENV || '(not set)'
-    }
+    cloud_env: process.env.TCB_ENV || 'checkout-d1gm4la5ne5471bff'
   });
 });
 
@@ -81,11 +88,29 @@ function generateUserId() {
   return 'u_' + timestamp + '_' + random;
 }
 
-const TOKEN_SECRET = process.env.TOKEN_SECRET || 'book_system_secret_2026_zxc';
-const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TOKEN_SECRET = process.env.TOKEN_SECRET || process.env.TENCENTCLOUD_SECRETKEY;
+if (!TOKEN_SECRET) {
+  throw new Error('缺少 TOKEN_SECRET 或 TENCENTCLOUD_SECRETKEY 环境变量');
+}
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + '_salt_zxc_2026').digest('hex');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash) return false;
+  if (!storedHash.startsWith('scrypt$')) {
+    const legacyHash = crypto.createHash('sha256').update(password + '_salt_zxc_2026').digest('hex');
+    return legacyHash === storedHash;
+  }
+  const parts = storedHash.split('$');
+  if (parts.length !== 3) return false;
+  const actual = Buffer.from(parts[2], 'hex');
+  const expected = crypto.scryptSync(password, parts[1], actual.length);
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
 function b64encode(buf) {
@@ -97,9 +122,14 @@ function b64decode(str) {
   while (str.length % 4) str += '=';
   return Buffer.from(str, 'base64').toString('utf8');
 }
-function generateToken(userId) {
+function generateToken(userId, tokenVersion = 0) {
   const header = b64encode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = b64encode(JSON.stringify({ sub: String(userId), iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS }));
+  const payload = b64encode(JSON.stringify({
+    sub: String(userId),
+    ver: Number(tokenVersion) || 0,
+    iat: Date.now(),
+    exp: Date.now() + TOKEN_TTL_MS
+  }));
   const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(header + '.' + payload).digest('base64')
     .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   return header + '.' + payload + '.' + sig;
@@ -110,25 +140,36 @@ function verifyToken(token) {
     if (!header || !payload || !sig) return null;
     const expSig = crypto.createHmac('sha256', TOKEN_SECRET).update(header + '.' + payload).digest('base64')
       .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-    if (expSig !== sig) return null;
+    const actualSig = Buffer.from(sig);
+    const expectedSig = Buffer.from(expSig);
+    if (actualSig.length !== expectedSig.length || !crypto.timingSafeEqual(actualSig, expectedSig)) return null;
     const data = JSON.parse(b64decode(payload));
     if (data.exp && data.exp < Date.now()) return null;
-    return data.sub;
+    return data;
   } catch { return null; }
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ code: 401, message: '未登录或登录已过期' });
   }
   const token = authHeader.substring(7);
-  const userId = verifyToken(token);
-  if (!userId) {
+  const payload = verifyToken(token);
+  if (!payload || !payload.sub) {
     return res.status(401).json({ code: 401, message: '未登录或登录已过期' });
   }
-  req.userId = userId;
-  next();
+  try {
+    const user = await queryOne(COLLECTIONS.USERS, { _id: String(payload.sub) });
+    if (!user || user.status !== 'active' || (Number(user.token_version) || 0) !== (Number(payload.ver) || 0)) {
+      return res.status(401).json({ code: 401, message: '未登录或登录已过期' });
+    }
+    req.userId = String(user._id);
+    req.user = user;
+    next();
+  } catch (err) {
+    res.status(500).json({ code: 500, message: '身份验证失败' });
+  }
 }
 
 function invalidateToken() {}
@@ -179,15 +220,21 @@ async function recordLogin(user, req, loginType) {
 
 app.post('/api/register', async (req, res) => {
   try {
-    const { username, password, nickname, role } = req.body;
+    const { username, password, nickname } = req.body;
+    if (typeof username !== 'string' || username.trim().length < 3) {
+      return res.status(400).json({ code: 400, message: '用户名至少3个字符' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ code: 400, message: '密码至少8个字符' });
+    }
     if (!username || !password) {
       return res.status(400).json({ code: 400, message: '用户名和密码不能为空' });
     }
     if (username.length < 3) {
       return res.status(400).json({ code: 400, message: '用户名至少3位' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ code: 400, message: '密码至少6位' });
+    if (password.length < 8) {
+      return res.status(400).json({ code: 400, message: '密码至少8位' });
     }
     const existing = await queryOne(COLLECTIONS.USERS, { username });
     if (existing) {
@@ -203,13 +250,14 @@ app.post('/api/register', async (req, res) => {
       email: '',
       phone: '',
       member_level: 'normal',
-      role: role === 'admin' ? 'admin' : 'user',
+      role: 'user',
       status: 'active',
+      token_version: 0,
       created_at: new Date().toISOString()
     };
     await create(COLLECTIONS.USERS, newUser);
     await recordLogin(newUser, req, 'register');
-    const token = generateToken(userId);
+    const token = generateToken(userId, 0);
     res.json({
       code: 0,
       data: {
@@ -236,13 +284,13 @@ app.post('/api/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ code: 401, message: '用户名或密码错误' });
     }
-    if (user.password !== hashPassword(password)) {
+    if (!verifyPassword(password, user.password)) {
       return res.status(401).json({ code: 401, message: '用户名或密码错误' });
     }
     if (user.status !== 'active') {
       return res.status(403).json({ code: 403, message: '账号已被禁用' });
     }
-    const token = generateToken(user._id);
+    const token = generateToken(user._id, user.token_version);
     storeToken(token, user._id);
     res.json({
       code: 0,
@@ -251,8 +299,12 @@ app.post('/api/login', async (req, res) => {
         user: sanitizeUser(user)
       }
     });
+    const updateData = { last_login_at: new Date().toISOString() };
+    if (!user.password.startsWith('scrypt$')) {
+      updateData.password = hashPassword(password);
+    }
     Promise.allSettled([
-      update(COLLECTIONS.USERS, user._id, { last_login_at: new Date().toISOString() }),
+      update(COLLECTIONS.USERS, user._id, updateData),
       recordLogin(user, req, 'login')
     ]).then(results => {
       results.forEach(result => {
@@ -280,7 +332,7 @@ app.post('/api/admin-login', async (req, res) => {
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
     }
-    if (user.password !== hashPassword(password)) {
+    if (!verifyPassword(password, user.password)) {
       return res.status(401).json({ code: 401, message: '密码错误' });
     }
     if (user.status !== 'active') {
@@ -289,7 +341,10 @@ app.post('/api/admin-login', async (req, res) => {
     if (user.role !== 'admin') {
       return res.status(403).json({ code: 403, message: '该账号无管理权限' });
     }
-    const token = generateToken(user._id);
+    if (!user.password.startsWith('scrypt$')) {
+      await update(COLLECTIONS.USERS, user._id, { password: hashPassword(password) });
+    }
+    const token = generateToken(user._id, user.token_version);
     storeToken(token, user._id);
     await update(COLLECTIONS.USERS, user._id, { last_login_at: new Date().toISOString() });
     await recordLogin(user, req, 'admin_login');
@@ -306,15 +361,28 @@ app.post('/api/admin-login', async (req, res) => {
   }
 });
 
-app.post('/api/logout', authMiddleware, (req, res) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader ? authHeader.substring(7) : null;
-  if (token) invalidateToken(token);
-  res.json({ code: 0, message: '退出成功' });
+app.post('/api/logout', authMiddleware, async (req, res) => {
+  try {
+    const nextVersion = (Number(req.user.token_version) || 0) + 1;
+    await update(COLLECTIONS.USERS, req.userId, { token_version: nextVersion });
+    res.json({ code: 0, message: '退出成功' });
+  } catch (err) {
+    res.status(500).json({ code: 500, message: '退出失败' });
+  }
 });
 
-const PUBLIC_PATHS = ['/health', '/api/test-db', '/api/register', '/api/login', '/api/admin-login', '/api/admin-register', '/api/menus', '/api/login-records', '/'];
+const PUBLIC_PATHS = [
+  '/health',
+  '/api/register',
+  '/api/login',
+  '/api/admin-login',
+  '/api/admin-register',
+  '/api/menus',
+  '/'
+];
+
 function isPublicRequest(req) {
+  if (req.path === '/upload') return false;
   if (!req.path.startsWith('/api/')) return true;
   if (PUBLIC_PATHS.includes(req.path)) return true;
   return req.method === 'GET' && (
@@ -324,15 +392,123 @@ function isPublicRequest(req) {
   );
 }
 
+function isAdminRequest(req) {
+  if (
+    req.path === '/api/test-db' ||
+    req.path === '/api/fix-admin' ||
+    req.path === '/api/login-records' ||
+    req.path.startsWith('/api/users') ||
+    req.path.startsWith('/api/import') ||
+    req.path === '/api/reset-seed' ||
+    req.path === '/api/upload' ||
+    req.path === '/upload'
+  ) {
+    return true;
+  }
+  if (req.path.startsWith('/api/categories') || req.path.startsWith('/api/products')) {
+    return req.method !== 'GET';
+  }
+  if (req.path.startsWith('/api/borrow-records')) {
+    return req.method !== 'GET';
+  }
+  if (
+    /^\/api\/user\/[^/]+$/.test(req.path) ||
+    (req.path === '/api/borrows' && req.method === 'GET') ||
+    (req.path === '/api/borrow' && req.method === 'POST') ||
+    (req.path === '/api/return' && req.method === 'POST')
+  ) {
+    return false;
+  }
+  return true;
+}
+
 app.use((req, res, next) => {
   if (isPublicRequest(req)) return next();
-  authMiddleware(req, res, next);
+  authMiddleware(req, res, () => {
+    const userPathMatch = req.path.match(/^\/api\/user\/([^/]+)$/);
+    if (
+      userPathMatch &&
+      req.user.role !== 'admin' &&
+      decodeURIComponent(userPathMatch[1]) !== String(req.userId)
+    ) {
+      return res.status(403).json({ code: 403, message: '无权访问其他用户' });
+    }
+    if (isAdminRequest(req) && req.user.role !== 'admin') {
+      return res.status(403).json({ code: 403, message: '需要管理员权限' });
+    }
+    next();
+  });
+});
+
+async function uploadCoverHandler(req, res) {
+  try {
+    const image = req.body && (req.body.image || req.body.data);
+    const match = typeof image === 'string'
+      ? image.match(/^data:image\/(jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=]+)$/)
+      : null;
+    if (!match) {
+      return res.status(400).json({ code: 400, message: '图片格式不正确' });
+    }
+    const buffer = Buffer.from(match[2], 'base64');
+    if (buffer.length === 0 || buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ code: 400, message: '图片大小必须在5MB以内' });
+    }
+    const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+    const fileName = `cover_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    const fileID = await uploadFile(`covers/${fileName}`, buffer);
+    const url = `/storage?fileID=${encodeURIComponent(fileID)}`;
+    res.json({ code: 0, message: '上传成功', data: { url, fileID } });
+  } catch (err) {
+    console.error('上传图片失败:', err);
+    res.status(500).json({ code: 500, message: '上传图片失败' });
+  }
+}
+
+app.post(
+  '/upload',
+  authMiddleware,
+  (req, res, next) => {
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({
+        code: 403,
+        message: '需要管理员权限'
+      });
+    }
+    next();
+  },
+  uploadCoverHandler
+);
+app.post('/api/upload', uploadCoverHandler);
+app.get('/storage', async (req, res) => {
+  try {
+    const fileID = req.query.fileID;
+    if (!fileID || !String(fileID).startsWith('cloud://')) {
+      return res.status(400).end();
+    }
+    const content = await downloadFile(String(fileID));
+    const extension = String(fileID).split('.').pop().toLowerCase();
+    const contentTypes = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp'
+    };
+    res.set('Content-Type', contentTypes[extension] || 'application/octet-stream');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(content);
+  } catch (err) {
+    res.status(404).end();
+  }
 });
 
 app.get('/api/fix-admin', async (req, res) => {
+  return res.status(410).json({ code: 410, message: '该接口已停用' });
   try {
     const adminUser = await queryOne(COLLECTIONS.USERS, { username: 'admin' });
-    const newPwdHash = hashPassword('admin123');
+    const newPwdHash = hashPassword(
+      process.env.INITIAL_ADMIN_PASSWORD ||
+      crypto.randomBytes(32).toString('hex')
+    );
     if (!adminUser) {
       const adminId = generateUserId();
       await create(COLLECTIONS.USERS, {
@@ -348,7 +524,7 @@ app.get('/api/fix-admin', async (req, res) => {
         status: 'active',
         created_at: new Date().toISOString()
       });
-      return res.json({ code: 0, message: 'admin 账号已创建,密码: admin123' });
+      return res.json({ code: 0, message: 'admin 账号已创建' });
     }
     await update(COLLECTIONS.USERS, adminUser._id, {
       password: newPwdHash,
@@ -357,7 +533,7 @@ app.get('/api/fix-admin', async (req, res) => {
     });
     res.json({
       code: 0,
-      message: 'admin 密码已重置为 admin123',
+      message: 'admin 密码已重置',
       data: { _id: adminUser._id, old_password_prefix: adminUser.password ? adminUser.password.slice(0, 8) : '(空)', new_password_prefix: newPwdHash.slice(0, 8) }
     });
   } catch (err) {
@@ -375,8 +551,8 @@ app.post('/api/admin-register', async (req, res) => {
     if (username.length < 3) {
       return res.status(400).json({ code: 400, message: '用户名至少3位' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ code: 400, message: '密码至少6位' });
+    if (password.length < 8) {
+      return res.status(400).json({ code: 400, message: '密码至少8位' });
     }
     const existing = await queryOne(COLLECTIONS.USERS, { username });
     if (existing) {
@@ -394,11 +570,12 @@ app.post('/api/admin-register', async (req, res) => {
       member_level: 'normal',
       role: 'admin',
       status: 'active',
+      token_version: 0,
       created_at: new Date().toISOString()
     };
     await create(COLLECTIONS.USERS, newUser);
     await recordLogin(newUser, req, 'register');
-    const token = generateToken(userId);
+    const token = generateToken(userId, 0);
     res.json({
       code: 0,
       data: {
@@ -469,6 +646,14 @@ app.put('/api/users/:id', async (req, res) => {
     if (!user) user = await queryOne(COLLECTIONS.USERS, { id: Number(id) });
     if (!user) {
       return res.status(404).json({ code: 404, message: '用户不存在' });
+    }
+    if (req.user.role !== 'admin' && String(req.params.id) !== String(req.userId)) {
+      return res.status(403).json({ code: 403, message: '无权修改其他用户' });
+    }
+    if (req.user.role !== 'admin') {
+      delete req.body.status;
+      delete req.body.role;
+      delete req.body.password;
     }
     const { nickname, avatar, email, phone, status, role, password } = req.body;
     const updateData = {};
@@ -916,11 +1101,61 @@ app.post('/api/borrow-records/batch-delete', async (req, res) => {
 
 app.post('/api/borrow', async (req, res) => {
   try {
+    const { product_id, borrow_days } = req.body;
+    if (!product_id) {
+      return res.status(400).json({ code: 400, message: '缺少图书ID' });
+    }
+    const product = await findById(COLLECTIONS.BOOKS, product_id);
+    if (!product) {
+      return res.status(404).json({ code: 404, message: '图书不存在' });
+    }
+    const days = Math.min(Math.max(Number(borrow_days) || 14, 1), 90);
+    const borrowDate = new Date();
+    const dueDate = new Date(borrowDate.getTime() + days * 24 * 60 * 60 * 1000);
+    const newRecord = {
+      user_id: String(req.userId),
+      user_name: req.user.nickname || req.user.username,
+      product_id: String(product._id),
+      product_name: product.name,
+      product_author: product.author || '',
+      product_code: product.code || '',
+      product_image: product.image || '',
+      borrow_date: borrowDate.toISOString(),
+      due_date: dueDate.toISOString(),
+      return_date: null,
+      status: 'borrowed'
+    };
+    const record = await runTransaction(async transaction => {
+      const bookRef = transaction.collection(COLLECTIONS.BOOKS).doc(String(product._id));
+      const snapshot = await bookRef.get();
+      const currentBook = snapshot.data && snapshot.data[0];
+      if (!currentBook || Number(currentBook.stock) <= 0 || currentBook.on_sale === false) {
+        throw new Error('STOCK_EMPTY');
+      }
+      const created = await transaction.collection(COLLECTIONS.BORROW_RECORDS).add(newRecord);
+      await bookRef.update({ stock: Number(currentBook.stock) - 1 });
+      return { _id: created._id || created.id, ...newRecord };
+    });
+    res.json({ code: 0, message: '借阅成功', data: record });
+  } catch (err) {
+    if (err.message === 'STOCK_EMPTY') {
+      return res.status(400).json({ code: 400, message: '库存不足' });
+    }
+    console.error('借阅失败:', err);
+    res.status(500).json({ code: 500, message: '借阅失败' });
+  }
+});
+
+app.post('/api/borrow-legacy-disabled', async (req, res) => {
+  return res.status(410).json({ code: 410, message: '旧借阅接口已停用' });
+  try {
     const { product_id, user_id, user_name, days = 30 } = req.body;
     if (!product_id) {
       return res.status(400).json({ code: 400, message: '缺少图书ID' });
     }
-    const effectiveUserId = user_id || req.userId;
+    const effectiveUserId = req.user.role === 'admin' && user_id
+      ? String(user_id)
+      : String(req.userId);
     if (!effectiveUserId) {
       return res.status(400).json({ code: 400, message: '缺少用户ID' });
     }
@@ -970,6 +1205,53 @@ app.post('/api/borrow', async (req, res) => {
 
 app.post('/api/return', async (req, res) => {
   try {
+    const { record_id } = req.body;
+    if (!record_id) {
+      return res.status(400).json({ code: 400, message: '缺少记录ID' });
+    }
+    const record = await findById(COLLECTIONS.BORROW_RECORDS, record_id);
+    if (!record) {
+      return res.status(404).json({ code: 404, message: '借阅记录不存在' });
+    }
+    if (req.user.role !== 'admin' && String(record.user_id) !== String(req.userId)) {
+      return res.status(403).json({ code: 403, message: '无权归还其他用户的借阅记录' });
+    }
+    const returnedRecord = await runTransaction(async transaction => {
+      const recordRef = transaction.collection(COLLECTIONS.BORROW_RECORDS).doc(String(record._id));
+      const recordSnapshot = await recordRef.get();
+      const currentRecord = recordSnapshot.data && recordSnapshot.data[0];
+      if (!currentRecord) throw new Error('RECORD_NOT_FOUND');
+      if (currentRecord.status === 'returned') throw new Error('ALREADY_RETURNED');
+
+      const bookRef = transaction.collection(COLLECTIONS.BOOKS).doc(String(currentRecord.product_id));
+      const bookSnapshot = await bookRef.get();
+      const currentBook = bookSnapshot.data && bookSnapshot.data[0];
+      if (!currentBook) throw new Error('BOOK_NOT_FOUND');
+
+      const returnDate = new Date().toISOString();
+      await recordRef.update({ status: 'returned', return_date: returnDate });
+      await bookRef.update({ stock: (Number(currentBook.stock) || 0) + 1 });
+      return { ...currentRecord, status: 'returned', return_date: returnDate };
+    });
+    res.json({ code: 0, message: '归还成功', data: returnedRecord });
+  } catch (err) {
+    const errorMap = {
+      RECORD_NOT_FOUND: [404, '借阅记录不存在'],
+      ALREADY_RETURNED: [400, '该图书已归还'],
+      BOOK_NOT_FOUND: [404, '图书不存在']
+    };
+    const mapped = errorMap[err.message];
+    if (mapped) {
+      return res.status(mapped[0]).json({ code: mapped[0], message: mapped[1] });
+    }
+    console.error('归还失败:', err);
+    res.status(500).json({ code: 500, message: '归还失败' });
+  }
+});
+
+app.post('/api/return-legacy-disabled', async (req, res) => {
+  return res.status(410).json({ code: 410, message: '旧归还接口已停用' });
+  try {
     const record_id = req.body.record_id || req.body.id;
     if (!record_id) {
       return res.status(400).json({ code: 400, message: '缺少记录ID' });
@@ -978,6 +1260,9 @@ app.post('/api/return', async (req, res) => {
     if (!record) record = await queryOne(COLLECTIONS.BORROW_RECORDS, { id: Number(record_id) });
     if (!record) {
       return res.status(404).json({ code: 404, message: '借阅记录不存在' });
+    }
+    if (req.user.role !== 'admin' && String(record.user_id) !== String(req.userId)) {
+      return res.status(403).json({ code: 403, message: '无权归还其他用户的借阅记录' });
     }
     if (record.status !== 'borrowed' && record.status !== 'overdue') {
       return res.status(400).json({ code: 400, message: '该记录已归还' });
@@ -1003,10 +1288,9 @@ app.post('/api/return', async (req, res) => {
 app.get('/api/borrow-records', async (req, res) => {
   try {
     const { user_id, status } = req.query;
-    let condition = {};
-    if (user_id) {
-      condition.user_id = String(user_id);
-    }
+    const condition = {
+      user_id: req.user.role === 'admin' && user_id ? String(user_id) : String(req.userId)
+    };
     if (status) {
       condition.status = status;
     }
@@ -1020,33 +1304,17 @@ app.get('/api/borrow-records', async (req, res) => {
   }
 });
 
-app.get('/api/borrows', async (req, res) => {
-  try {
-    const { user_id, status } = req.query;
-    let condition = {};
-    if (user_id) {
-      condition.user_id = String(user_id);
-    }
-    if (status) {
-      condition.status = status;
-    }
-    const records = await query(COLLECTIONS.BORROW_RECORDS, condition);
-    records.sort((a, b) => new Date(b.borrow_date) - new Date(a.borrow_date));
-    const result = records.map(r => ({ ...r, id: r._id }));
-    res.json({ code: 0, data: result });
-  } catch (err) {
-    console.error('获取借阅记录失败:', err);
-    res.status(500).json({ code: 500, message: err.message });
-  }
+app.get('/api/borrows', (req, res) => {
+  const q = new URLSearchParams(req.query).toString();
+  res.redirect(302, '/api/borrow-records' + (q ? '?' + q : ''));
 });
 
 app.get('/api/login-records', async (req, res) => {
   try {
     const { user_id, login_type } = req.query;
-    let condition = {};
-    if (user_id) {
-      condition.user_id = String(user_id);
-    }
+    const condition = {
+      user_id: req.user.role === 'admin' && user_id ? String(user_id) : String(req.userId)
+    };
     if (login_type) {
       condition.login_type = login_type;
     }
@@ -1196,7 +1464,7 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
-app.get('/api/reset-seed', async (req, res) => {
+app.post('/api/reset-seed', async (req, res) => {
   try {
     await waitForDb(2000);
     if (!cloudAvailable()) {
@@ -1270,7 +1538,7 @@ app.listen(PORT, '0.0.0.0', () => {
         const adminUser = {
           _id: adminId,
           username: 'admin',
-          password: hashPassword('admin123'),
+      password: hashPassword(process.env.INITIAL_ADMIN_PASSWORD || crypto.randomBytes(32).toString('hex')),
           nickname: '系统管理员',
           avatar: '',
           email: '',

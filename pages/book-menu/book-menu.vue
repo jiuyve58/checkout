@@ -63,7 +63,7 @@
 									<text class="rating-num">{{ featuredBook.rating }}</text>
 								</view>
 								<view class="reserved-tag">
-									<text class="reserved-text">已预约</text>
+									<text class="reserved-text">{{ featuredBook.stock > 0 ? '可借阅' : '暂无库存' }}</text>
 								</view>
 							</view>
 						</view>
@@ -171,7 +171,6 @@
 							<text class="item-name">{{ item.name }}</text>
 							<text class="item-author">{{ item.author }}</text>
 							<view class="item-bottom">
-								<text class="item-price">￥{{ item.price }}</text>
 								<view class="qty-control">
 									<view class="qty-btn" @click="decreaseQty(item)">
 										<uni-icons type="minus" size="12" color="#3D2817"></uni-icons>
@@ -204,7 +203,6 @@
 	import { getCart, getCartTotal, updateCartItemQuantity, removeFromCart, clearCart } from '@/utils/cart.js';
 	import { importObject, resolveImageUrl } from '@/utils/coffee-api.js';
 	import { getCurrentUser, isLoggedIn } from '@/utils/user.js';
-	import { getMockProducts, getMockCategories } from '@/utils/mock-data.js';
 	
 	export default {
 		data() {
@@ -213,7 +211,7 @@
 				categories: [],
 				coffeeList: [],
 				searchKeyword: '',
-				cartTotal: { totalCount: 0, totalPrice: 0 },
+				cartTotal: { totalCount: 0 },
 				cartItems: [],
 				showCartList: false,
 				currentNav: 'home',
@@ -316,13 +314,13 @@
 						this.categories = list;
 						this.selectedCategory = list[0]._id;
 					} else {
-						this.categories = getMockCategories();
-						this.selectedCategory = this.categories[0]._id;
+						this.categories = [];
+						this.selectedCategory = '';
 					}
 				}).catch(err => {
-					console.warn('分类数据加载失败，使用mock数据:', err.message);
-					this.categories = getMockCategories();
-					this.selectedCategory = this.categories[0]._id;
+					console.error('分类数据加载失败:', err);
+					this.categories = [];
+					this.selectedCategory = '';
 				});
 			},
 			loadProducts(categoryId = '') {
@@ -332,11 +330,12 @@
 					if (list && list.length > 0) {
 						this.coffeeList = this.formatProducts(list);
 					} else {
-						this.coffeeList = this.formatProducts(getMockProducts(categoryId));
+						this.coffeeList = [];
 					}
 				}).catch(err => {
-					console.warn('商品数据加载失败，使用mock数据:', err.message);
-					this.coffeeList = this.formatProducts(getMockProducts(categoryId));
+					console.error('图书数据加载失败:', err);
+					this.coffeeList = [];
+					uni.showToast({ title: '图书数据加载失败', icon: 'none' });
 				});
 			},
 			formatProducts(list) {
@@ -347,9 +346,11 @@
 					code: item.code || '',
 					year: item.year || null,
 					description: item.description || '',
-					price: item.price ? (item.price / 100).toFixed(0) : 14,
 					image: resolveImageUrl(item.image),
-					rating: item.rating || 4.8
+					rating: item.rating || 4.8,
+					stock: Number(item.stock) || 0,
+					on_sale: item.on_sale !== false,
+					category_id: item.category_id
 				}));
 			},
 			onImageError(e, book, index) {
@@ -366,19 +367,16 @@
 				if (!keyword) { this.loadProducts(this.selectedCategory); return; }
 				const coffeeProductsObj = importObject('get-coffee-products');
 				coffeeProductsObj.getList(this.selectedCategory).then(res => {
-					const list = res && res.data ? res.data : (Array.isArray(res) ? res : getMockProducts(this.selectedCategory));
+					const list = res && res.data ? res.data : (Array.isArray(res) ? res : []);
 					const filtered = list.filter(item =>
 						(item.name || '').toLowerCase().includes(keyword) ||
 						(item.author || '').toLowerCase().includes(keyword)
 					);
 					this.coffeeList = this.formatProducts(filtered);
-				}).catch(() => {
-					const list = getMockProducts(this.selectedCategory);
-					const filtered = list.filter(item =>
-						(item.name || '').toLowerCase().includes(keyword) ||
-						(item.author || '').toLowerCase().includes(keyword)
-					);
-					this.coffeeList = this.formatProducts(filtered);
+				}).catch(err => {
+					console.error('搜索图书失败:', err);
+					this.coffeeList = [];
+					uni.showToast({ title: '搜索失败', icon: 'none' });
 				});
 			},
 			clearSearch() {
@@ -394,6 +392,10 @@
 				this.updateCartTotal();
 			},
 			increaseQty(item) {
+				if (Number.isFinite(Number(item.stock)) && item.quantity >= Number(item.stock)) {
+					uni.showToast({ title: '已达到可借库存', icon: 'none' });
+					return;
+				}
 				updateCartItemQuantity(item._id, item.quantity + 1);
 				this.updateCartTotal();
 			},
@@ -401,7 +403,7 @@
 				uni.setStorageSync('currentCoffee', {
 					_id: book._id, name: book.name, author: book.author,
 					code: book.code, year: book.year, description: book.description,
-					price: book.price, image: book.image, rating: book.rating,
+					image: book.image, rating: book.rating,
 					stock: book.stock
 				});
 				uni.navigateTo({ url: '/pages/coffee-product-detail/coffee-product-detail?id=' + book._id });
@@ -1022,14 +1024,8 @@
 
 	.item-bottom {
 		display: flex;
-		justify-content: space-between;
+		justify-content: flex-end;
 		align-items: center;
-	}
-
-	.item-price {
-		font-size: 14px;
-		font-weight: 600;
-		color: #F5C542;
 	}
 
 	.qty-control {

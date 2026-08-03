@@ -18,7 +18,7 @@
 		<view class="header-area" v-else>
 			<view class="profile-top">
 				<view class="avatar-wrap">
-					<image class="avatar" :src="user.avatar || '/static/avatar-placeholder.png'" mode="aspectFill" @error="onImageError"></image>
+					<image class="avatar" :src="user.avatar || '/static/avatar-placeholder.png'" mode="aspectFill" @error="onAvatarError"></image>
 					<view class="online-dot"></view>
 				</view>
 				<view class="user-info">
@@ -73,7 +73,7 @@
 						<text class="card-hint">{{ currentBorrows.length }}本借阅中</text>
 					</view>
 					<view class="current-borrow" v-for="item in currentBorrows" :key="item._id">
-						<image class="borrow-cover" :src="item.image" mode="aspectFill" @error="onImageError"></image>
+						<image class="borrow-cover" :src="item.image" mode="aspectFill" @error="onImageError(item)"></image>
 						<view class="borrow-detail">
 							<text class="borrow-title">{{ item.product_name }}</text>
 							<text class="borrow-author">到期: {{ formatDate(item.due_date) }}</text>
@@ -125,17 +125,17 @@
 								<text class="menu-arrow">›</text>
 							</view>
 						</view>
-						<view class="menu-item" @click="goUsernameEdit">
-							<view class="menu-left">
-								<view class="menu-icon-wrap">
-									<text class="menu-icon">@</text>
+								<view class="menu-item" @click="goUsernameEdit">
+									<view class="menu-left">
+										<view class="menu-icon-wrap">
+											<text class="menu-icon">@</text>
+										</view>
+										<text class="menu-text">修改用户名</text>
+									</view>
+									<view class="menu-right">
+										<text class="menu-arrow">›</text>
+									</view>
 								</view>
-								<text class="menu-text">修改用户名</text>
-							</view>
-							<view class="menu-right">
-								<text class="menu-arrow">›</text>
-							</view>
-						</view>
 						<view class="menu-item" @click="handleLogout">
 							<view class="menu-left">
 								<view class="menu-icon-wrap logout-icon">
@@ -181,7 +181,7 @@
 
 <script>
 	import { borrowApi, resolveImageUrl } from '@/utils/coffee-api.js';
-	import { getCurrentUser, updateUserName, updateUserInfo, isLoggedIn, logout as doLogout } from '@/utils/user.js';
+	import { getCurrentUser, updateUserInfo, isLoggedIn, validateSession, logout as doLogout } from '@/utils/user.js';
 
 	export default {
 		data() {
@@ -190,32 +190,59 @@
 				user: { user_id: '', user_name: '' },
 				stats: { total: 0, active: 0, returned: 0, overdue: 0 },
 				currentBorrows: [],
+                                sessionCheckTimer: null,
+                                sessionChecking: false,
 				serviceItems: [
 					{ key: 'history', name: '借阅记录', icon: '◷', badge: '' },
 					{ key: 'wishlist', name: '心愿书单', icon: '♡', badge: '' }
 				]
 			};
 		},
-		onLoad() {
-			this.loadUser();
-		},
-		onShow() {
-			this.loadUser();
-			if (this.isLoggedIn) {
-				this.loadBorrowStats();
-			}
+                async onShow() {
+                        await this.refreshUserState(true);
+                        this.startSessionCheck();
+                },
+                onHide() {
+                        this.stopSessionCheck();
+                },
+                onUnload() {
+                        this.stopSessionCheck();
 		},
 		methods: {
-			loadUser() {
-				this.isLoggedIn = isLoggedIn();
-				if (this.isLoggedIn) {
-					this.user = getCurrentUser();
-				} else {
-					this.user = { user_id: '', user_name: '' };
-					this.stats = { total: 0, active: 0, returned: 0, overdue: 0 };
-					this.currentBorrows = [];
+                        resetUserState() {
+                                this.isLoggedIn = false;
+                                this.user = { user_id: '', user_name: '' };
+                                this.stats = { total: 0, active: 0, returned: 0, overdue: 0 };
+                                this.currentBorrows = [];
+                        },
+                        async refreshUserState(loadStats = false) {
+                                if (this.sessionChecking) return;
+                                this.sessionChecking = true;
+                                try {
+                                        const currentUser = await validateSession();
+                                        if (!currentUser) {
+                                                this.resetUserState();
+                                                return;
+                                        }
+                                        this.isLoggedIn = true;
+                                        this.user = currentUser;
+                                        if (loadStats) await this.loadBorrowStats();
+                                } finally {
+                                        this.sessionChecking = false;
 				}
 			},
+                        startSessionCheck() {
+                                this.stopSessionCheck();
+                                this.sessionCheckTimer = setInterval(() => {
+                                        this.refreshUserState();
+                                }, 10000);
+                        },
+                        stopSessionCheck() {
+                                if (this.sessionCheckTimer) {
+                                        clearInterval(this.sessionCheckTimer);
+                                        this.sessionCheckTimer = null;
+                                }
+                        },
 			async loadBorrowStats() {
 				try {
 					const user = getCurrentUser();
@@ -237,6 +264,7 @@
 						}));
 				} catch (err) {
 					console.error('获取借阅统计失败:', err);
+                                        if (!isLoggedIn()) this.resetUserState();
 				}
 			},
 			formatDate(dateStr) {
@@ -268,7 +296,7 @@
 				if (key === 'history') {
 					uni.navigateTo({ url: '/pages/jilu/jilu' });
 				} else if (key === 'wishlist') {
-					uni.showToast({ title: '心愿书单', icon: 'none' });
+					uni.redirectTo({ url: '/pages/shujia/shujia' });
 				}
 			},
 			goProfileEdit() {
@@ -276,40 +304,46 @@
 					title: '修改昵称',
 					editable: true,
 					placeholderText: '请输入新昵称',
-					success: (res) => {
-						if (res.confirm && res.content) {
-							this.user = updateUserName(res.content);
-							uni.showToast({ title: '修改成功', icon: 'success' });
-						}
-					}
-				});
-			},
-			goUsernameEdit() {
-				uni.showModal({
-					title: '修改用户名',
-					content: this.user.username || '',
-					editable: true,
-					placeholderText: '请输入新用户名',
 					success: async (res) => {
-						if (!res.confirm) return;
-						const username = String(res.content || '').trim();
-						if (username.length < 3 || username.length > 30) {
-							uni.showToast({ title: '用户名需为3到30个字符', icon: 'none' });
-							return;
-						}
-						if (username === this.user.username) {
-							uni.showToast({ title: '用户名未修改', icon: 'none' });
-							return;
-						}
-						try {
-							this.user = await updateUserInfo(this.user.user_id, { username });
-							uni.showToast({ title: '修改成功', icon: 'success' });
-						} catch (err) {
-							uni.showToast({ title: err.message || '修改失败', icon: 'none' });
+						if (res.confirm && res.content) {
+							try {
+								this.user = await updateUserInfo(this.user.user_id, {
+									nickname: res.content.trim()
+								});
+								uni.showToast({ title: '修改成功', icon: 'success' });
+							} catch (err) {
+								uni.showToast({ title: err.message || '修改失败', icon: 'none' });
+							}
 						}
 					}
 				});
 			},
+					goUsernameEdit() {
+						uni.showModal({
+							title: '修改用户名',
+							content: this.user.username || '',
+							editable: true,
+							placeholderText: '请输入新用户名',
+							success: async (res) => {
+								if (!res.confirm) return;
+								const username = String(res.content || '').trim();
+								if (username.length < 3 || username.length > 30) {
+									uni.showToast({ title: '用户名需为3到30个字符', icon: 'none' });
+									return;
+								}
+								if (username === this.user.username) {
+									uni.showToast({ title: '用户名未修改', icon: 'none' });
+									return;
+								}
+								try {
+									this.user = await updateUserInfo(this.user.user_id, { username });
+									uni.showToast({ title: '修改成功', icon: 'success' });
+								} catch (err) {
+									uni.showToast({ title: err.message || '修改失败', icon: 'none' });
+								}
+							}
+						});
+					},
 			goLogin() {
 				uni.navigateTo({ url: '/pages/login/login' });
 			},
@@ -317,10 +351,10 @@
 				uni.showModal({
 					title: '确认退出',
 					content: '确定要退出登录吗？',
-					success: (res) => {
+					success: async (res) => {
 						if (res.confirm) {
-							doLogout();
-							this.loadUser();
+							await doLogout();
+							this.resetUserState();
 							uni.showToast({ title: '已退出登录', icon: 'success' });
 						}
 					}
@@ -360,8 +394,13 @@
 				}
 				uni.redirectTo({ url: '/pages/jilu/jilu' });
 			},
-			onImageError(e) {
-				e.target.src = '/static/book-placeholder-1.png';
+			onAvatarError() {
+				this.user.avatar = '';
+			},
+			onImageError(item) {
+				if (item.image !== '/static/book-placeholder-1.png') {
+					item.image = '/static/book-placeholder-1.png';
+				}
 			}
 		}
 	}

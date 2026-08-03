@@ -14,6 +14,7 @@ const TCB_SECRETKEY = process.env.TENCENTCLOUD_SECRETKEY || '';
 
 let cloudReady = false;
 let cloudDb = null;
+let cloudApp = null;
 let lastInitError = '';
 
 const collectionMap = {
@@ -25,6 +26,9 @@ const collectionMap = {
 };
 
 function cloudAvailable() {
+  if (!cloudReady) {
+    initCloud().catch(() => {});
+  }
   return cloudReady && cloudDb !== null;
 }
 
@@ -50,12 +54,12 @@ async function initCloud() {
   try {
     console.log('[数据库] 初始化 CloudBase SDK,env=', TCB_ENV);
     const cloudbase = require('@cloudbase/node-sdk');
-    const app = cloudbase.init({
+    cloudApp = cloudbase.init({
       envId: TCB_ENV,
       secretId: TCB_SECRETID,
       secretKey: TCB_SECRETKEY
     });
-    cloudDb = app.database();
+    cloudDb = cloudApp.database();
     cloudReady = true;
     lastInitError = '';
     console.log('[数据库] CloudBase SDK 初始化成功');
@@ -71,15 +75,24 @@ const DB_OP_TIMEOUT = 8000;
 
 async function query(name, condition = {}) {
   if (!cloudAvailable()) throw new Error('云数据库未连接');
-  let q = getCloudCollection(name).limit(1000);
-  if (Object.keys(condition).length > 0) {
-    q = q.where(condition);
+  const pageSize = 1000;
+  const maxResults = 10000;
+  const items = [];
+  for (let offset = 0; offset < maxResults; offset += pageSize) {
+    let q = getCloudCollection(name);
+    if (Object.keys(condition).length > 0) {
+      q = q.where(condition);
+    }
+    q = q.skip(offset).limit(pageSize);
+    const snapshot = await Promise.race([
+      q.get(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('query timeout:' + name)), DB_OP_TIMEOUT))
+    ]);
+    const batch = snapshot.data.map(normalizeItem);
+    items.push(...batch);
+    if (batch.length < pageSize) break;
   }
-  const snapshot = await Promise.race([
-    q.get(),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('query timeout:' + name)), DB_OP_TIMEOUT))
-  ]);
-  return snapshot.data.map(normalizeItem);
+  return items;
 }
 
 async function queryOne(name, condition = {}) {
@@ -134,6 +147,40 @@ async function remove(name, docId) {
 
 async function aggregate(name) {
   return null;
+}
+
+async function runTransaction(handler) {
+  if (!cloudAvailable()) throw new Error('云数据库未连接');
+  if (typeof cloudDb.runTransaction !== 'function') {
+    throw new Error('当前数据库 SDK 不支持事务');
+  }
+  const transactionResult = await Promise.race([
+    cloudDb.runTransaction(handler),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('transaction timeout')), DB_OP_TIMEOUT))
+  ]);
+
+  return transactionResult &&
+    Object.prototype.hasOwnProperty.call(transactionResult, 'result')
+    ? transactionResult.result
+    : transactionResult;
+}
+
+async function uploadFile(cloudPath, fileContent) {
+  if (!cloudAvailable() || !cloudApp) throw new Error('云存储未连接');
+  const result = await Promise.race([
+    cloudApp.uploadFile({ cloudPath, fileContent }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('upload timeout')), DB_OP_TIMEOUT))
+  ]);
+  return result.fileID;
+}
+
+async function downloadFile(fileID) {
+  if (!cloudAvailable() || !cloudApp) throw new Error('云存储未连接');
+  const result = await Promise.race([
+    cloudApp.downloadFile({ fileID }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('download timeout')), DB_OP_TIMEOUT))
+  ]);
+  return result.fileContent;
 }
 
 async function seedDataFromLocal() {
@@ -203,6 +250,9 @@ module.exports = {
   update,
   remove,
   aggregate,
+  runTransaction,
+  uploadFile,
+  downloadFile,
   cloudAvailable,
   seedDataFromLocal,
   importDataFromJson,

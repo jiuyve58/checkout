@@ -37,7 +37,7 @@
 				<text class="month-label">{{ group.month }}</text>
 				<view class="record-list">
 					<view class="record-card" v-for="item in group.records" :key="item._id">
-						<image class="record-cover" :src="item.image" mode="aspectFill" @error="onImageError"></image>
+						<image class="record-cover" :src="item.image" mode="aspectFill" @error="onImageError(item)"></image>
 						<view class="record-info">
 							<view class="record-top">
 								<text class="record-name">{{ item.product_name }}</text>
@@ -131,14 +131,12 @@
 				return Object.keys(map).map(month => ({ month, records: map[month] }));
 			}
 		},
-		onLoad() {
-			this.loadRecords();
-		},
 		onShow() {
 			this.loadRecords();
 		},
 		methods: {
 			async loadRecords() {
+				if (this.loading) return;
 				this.isLoggedIn = isLoggedIn();
 				if (!this.isLoggedIn) {
 					this.records = [];
@@ -161,8 +159,10 @@
 					}));
 				} catch (err) {
 					console.error('获取借阅记录失败:', err);
+					this.records = [];
+				} finally {
+					this.loading = false;
 				}
-				this.loading = false;
 			},
 			getMonth(dateStr) {
 				if (!dateStr) return '';
@@ -218,8 +218,10 @@
 			goLogin() {
 				uni.navigateTo({ url: '/pages/login/login' });
 			},
-			onImageError(e) {
-				e.target.src = '/static/book-placeholder-1.png';
+			onImageError(item) {
+				if (item.image !== '/static/book-placeholder-1.png') {
+					item.image = '/static/book-placeholder-1.png';
+				}
 			}
 		}
 	}
